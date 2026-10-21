@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+dist/
+.expo/
+*.tsbuildinfo
+
+# Secrets - never commit
+.env
+.env.local
+.env.*.local
+mobile/.env
+web/.env.local
+
+.vercel/
+.DS_Store
+npm-debug.log*
