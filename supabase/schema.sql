@@ -48,7 +48,9 @@ CREATE TABLE IF NOT EXISTS public.seasons (
 INSERT INTO public.seasons (id, name, is_current) VALUES
   ('20242025', '2024-2025', FALSE),
   ('20252026', '2025-2026', FALSE),
-  ('20262027', '2026-2027', TRUE)
+  ('20262027', '2026-2027', TRUE),
+  ('20272028', '2027-2028', FALSE),
+  ('20282029', '2028-2029', FALSE)
 ON CONFLICT (id) DO UPDATE SET is_current = EXCLUDED.is_current;
 
 -- ── 3. Drafts ────────────────────────────────────────────────────────────────
@@ -71,6 +73,7 @@ CREATE TABLE IF NOT EXISTS public.drafts (
   salary_cap_amount     NUMERIC(6, 2) NOT NULL DEFAULT 88.00 CHECK (salary_cap_amount >= 0), -- in millions
   current_pick          INTEGER NOT NULL DEFAULT 1 CHECK (current_pick >= 1),
   max_teams             INTEGER NOT NULL DEFAULT 16 CHECK (max_teams >= 2),
+  pick_order_type       TEXT NOT NULL DEFAULT 'snake' CHECK (pick_order_type IN ('snake', 'linear')),
   created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

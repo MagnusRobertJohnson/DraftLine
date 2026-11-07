@@ -3,7 +3,48 @@
 
 import type { NHLSkater, NHLGoalie } from './types';
 
-export const CURRENT_SEASON = '20262027';
+// The NHL season starts in the fall: from September on it is YYYY/YYYY+1, otherwise (YYYY-1)/YYYY.
+export function currentSeasonStartYear(now = new Date()): number {
+  return now.getMonth() >= 8 ? now.getFullYear() : now.getFullYear() - 1;
+}
+
+export const CURRENT_SEASON = `${currentSeasonStartYear()}${currentSeasonStartYear() + 1}`;
+
+const NHL_TEAMS = [
+  'ANA', 'BOS', 'BUF', 'CAR', 'CBJ', 'CGY', 'CHI', 'COL', 'DAL', 'DET', 'EDM', 'FLA', 'LAK', 'MIN', 'MTL', 'NJD',
+  'NSH', 'NYI', 'NYR', 'OTT', 'PHI', 'PIT', 'SEA', 'SJS', 'STL', 'TBL', 'TOR', 'UTA', 'VAN', 'VGK', 'WPG', 'WSH',
+];
+
+export interface RosterPlayer {
+  playerId: number;
+  fullName: string;
+  positionCode: string;
+  teamAbbrev: string;
+}
+
+// Current team rosters, so players with no games played yet (rookies, call-ups, scratches)
+// can still be listed. Teams that fail to load are skipped.
+export async function getRosterPlayers(): Promise<RosterPlayer[]> {
+  const results = await Promise.all(
+    NHL_TEAMS.map(async (team) => {
+      try {
+        const res = await fetch(`https://api-web.nhle.com/v1/roster/${team}/current`, { cache: 'no-store' });
+        if (!res.ok) return [];
+        const json = await res.json();
+        const rows = [...(json.forwards ?? []), ...(json.defensemen ?? []), ...(json.goalies ?? [])];
+        return rows.map((p: any) => ({
+          playerId: Number(p.id),
+          fullName: `${p.firstName?.default ?? ''} ${p.lastName?.default ?? ''}`.trim(),
+          positionCode: String(p.positionCode ?? 'F'),
+          teamAbbrev: team,
+        })) as RosterPlayer[];
+      } catch {
+        return [];
+      }
+    })
+  );
+  return results.flat().filter((p) => p.playerId && p.fullName);
+}
 
 // Game Types: 2 = Regular Season, 3 = Playoffs
 export type GameTypeId = '2' | '3';

@@ -246,7 +246,9 @@ export function parseSpotracRankingsHTML(html: string): SalaryEntry[] {
  * Fetches all active player current-year cap hits directly from Spotrac rankings.
  * Falls back to active contracts pagination if rankings endpoint fails.
  */
-export async function fetchSpotracSalaries(year = '2026'): Promise<SalaryEntry[]> {
+export async function fetchSpotracSalaries(
+  year = String(new Date().getMonth() >= 8 ? new Date().getFullYear() : new Date().getFullYear() - 1)
+): Promise<SalaryEntry[]> {
   // Strategy 1: Fetch full current-year rankings (contains ~800 players in one clean page with current-year cap hits)
   try {
     const rankingsUrl = `${SPOTRAC_RANKINGS_BASE}/${year}/`;
