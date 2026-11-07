@@ -15,6 +15,11 @@ import {
 import { supabase } from './src/lib/supabase';
 import type { Draft, DraftTeam, DraftPick, Profile } from '../shared/types';
 import { validateRosterSwap, normalizePositionGroup, getNextEasternMidnight } from '../shared/roster-validation';
+import { teamIndexForPick, roundForPick } from '../shared/draftOrder';
+import { fetchIsPaidAdmin, friendlyNetworkError } from './src/lib/api';
+import PlayersScreen from './src/screens/PlayersScreen';
+import StandingsScreen from './src/screens/StandingsScreen';
+import AdminScreen from './src/screens/AdminScreen';
 
 export default function App() {
   const [sessionUser, setSessionUser] = useState<any>(null);
@@ -28,7 +33,8 @@ export default function App() {
   const [authError, setAuthError] = useState('');
 
   // Dashboard / Navigation
-  const [currentScreen, setCurrentScreen] = useState<'dashboard' | 'draft_board' | 'roster_ir' | 'admin_console'>('dashboard');
+  const [currentScreen, setCurrentScreen] = useState<'dashboard' | 'draft_board' | 'roster_ir' | 'admin_console' | 'standings' | 'players'>('dashboard');
+  const [isPaidAdmin, setIsPaidAdmin] = useState(false);
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [selectedDraft, setSelectedDraft] = useState<Draft | null>(null);
 
@@ -65,6 +71,7 @@ export default function App() {
     const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
     if (data) setProfile(data as Profile);
     loadDrafts(userId);
+    fetchIsPaidAdmin(userId).then(setIsPaidAdmin).catch(() => setIsPaidAdmin(false));
   };
 
   const loadDrafts = async (userId: string) => {
@@ -89,36 +96,46 @@ export default function App() {
       return;
     }
 
-    if (isRegister) {
-      const { error } = await supabase.auth.signUp({ email, password });
-      if (error) setAuthError(error.message);
-      else Alert.alert('Success', 'Account created! Please sign in.');
-    } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) setAuthError(error.message);
+    try {
+      if (isRegister) {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) setAuthError(friendlyNetworkError(error.message));
+        else Alert.alert('Success', 'Account created! Please sign in.');
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) setAuthError(friendlyNetworkError(error.message));
+      }
+    } catch (e: any) {
+      setAuthError(friendlyNetworkError(e?.message || 'Network request failed'));
     }
   };
 
   // Open Draft
-  const openDraft = async (draft: Draft) => {
-    setSelectedDraft(draft);
-    setLoading(true);
+  const refreshDraft = async (draftId: string) => {
+    const { data: d } = await supabase.from('drafts').select('*').eq('id', draftId).single();
+    const { data: t } = await supabase.from('draft_teams').select('*').eq('draft_id', draftId).order('draft_order', { ascending: true });
+    const { data: p } = await supabase.from('draft_picks').select('*').eq('draft_id', draftId).order('pick_number');
 
-    const { data: t } = await supabase.from('draft_teams').select('*').eq('draft_id', draft.id);
-    const { data: p } = await supabase.from('draft_picks').select('*').eq('draft_id', draft.id).order('pick_number');
-
+    if (d) setSelectedDraft(d as Draft);
     if (t) {
       setTeams(t as DraftTeam[]);
       if (sessionUser) {
         const myTeam = t.find((team: any) => team.user_id === sessionUser.id);
-        setUserTeam(myTeam || null);
+        setUserTeam((myTeam as DraftTeam) || null);
       }
     }
     if (p) setPicks(p as DraftPick[]);
+  };
 
+  const openDraft = async (draft: Draft) => {
+    setSelectedDraft(draft);
+    setLoading(true);
+    await refreshDraft(draft.id);
     setLoading(false);
     setCurrentScreen('draft_board');
   };
+
+  const canAdminSelected = !!selectedDraft && !!sessionUser && selectedDraft.admin_id === sessionUser.id;
 
   // Real-time Pick Updates for Mobile
   useEffect(() => {
@@ -126,20 +143,9 @@ export default function App() {
 
     const channel = supabase
       .channel(`mobile-draft-${selectedDraft.id}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'draft_picks', filter: `draft_id=eq.${selectedDraft.id}` },
-        (payload) => {
-          setPicks((prev) => [...prev, payload.new as DraftPick]);
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'draft_picks', filter: `draft_id=eq.${selectedDraft.id}` },
-        () => {
-          if (selectedDraft) openDraft(selectedDraft);
-        }
-      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'draft_picks', filter: `draft_id=eq.${selectedDraft.id}` }, () => refreshDraft(selectedDraft.id))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'draft_teams', filter: `draft_id=eq.${selectedDraft.id}` }, () => refreshDraft(selectedDraft.id))
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'drafts', filter: `id=eq.${selectedDraft.id}` }, () => refreshDraft(selectedDraft.id))
       .subscribe();
 
     return () => {
@@ -201,7 +207,7 @@ export default function App() {
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" />
         <View style={styles.authBox}>
-          <Text style={styles.logoText}>🏒 HockeyPool</Text>
+          <Text style={styles.logoText}>🏒 DraftLine</Text>
           <Text style={styles.tagline}>Mobile Live Draft & Fantasy Hockey</Text>
 
           {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
@@ -239,6 +245,16 @@ export default function App() {
     );
   }
 
+  // SCREEN: NHL PLAYERS
+  if (currentScreen === 'players') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <PlayersScreen isAdmin={isPaidAdmin} onBack={() => setCurrentScreen('dashboard')} />
+      </SafeAreaView>
+    );
+  }
+
   // SCREEN 2: DASHBOARD
   if (currentScreen === 'dashboard') {
     return (
@@ -246,7 +262,7 @@ export default function App() {
         <StatusBar barStyle="light-content" />
         <View style={styles.header}>
           <View>
-            <Text style={styles.headerTitle}>🏒 HockeyPool</Text>
+            <Text style={styles.headerTitle}>🏒 DraftLine</Text>
             <Text style={styles.headerSubtitle}>{profile?.email}</Text>
           </View>
           <TouchableOpacity onPress={() => supabase.auth.signOut()}>
@@ -255,6 +271,10 @@ export default function App() {
         </View>
 
         <ScrollView style={styles.body}>
+          <TouchableOpacity style={styles.secondaryButton} onPress={() => setCurrentScreen('players')}>
+            <Text style={styles.secondaryButtonText}>🏒 NHL Players & Salaries</Text>
+          </TouchableOpacity>
+
           {/* Join Draft Box */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>🎟️ Join Draft Pool</Text>
@@ -317,6 +337,20 @@ export default function App() {
       {/* Tabs */}
       <View style={styles.tabBar}>
         <TouchableOpacity
+          style={[styles.tabItem, currentScreen === 'standings' && styles.tabActive]}
+          onPress={() => setCurrentScreen('standings')}
+        >
+          <Text style={[styles.tabText, currentScreen === 'standings' && styles.tabTextActive]}>Standings</Text>
+        </TouchableOpacity>
+        {canAdminSelected && (
+          <TouchableOpacity
+            style={[styles.tabItem, currentScreen === 'admin_console' && styles.tabActive]}
+            onPress={() => setCurrentScreen('admin_console')}
+          >
+            <Text style={[styles.tabText, currentScreen === 'admin_console' && styles.tabTextActive]}>Admin</Text>
+          </TouchableOpacity>
+        )}
+        <TouchableOpacity
           style={[styles.tabItem, currentScreen === 'draft_board' && styles.tabActive]}
           onPress={() => setCurrentScreen('draft_board')}
         >
@@ -335,9 +369,25 @@ export default function App() {
         </TouchableOpacity>
       </View>
 
+      {currentScreen === 'standings' && selectedDraft && <StandingsScreen draftId={selectedDraft.id} />}
+      {currentScreen === 'admin_console' && selectedDraft && canAdminSelected && (
+        <AdminScreen draftId={selectedDraft.id} onOpenBoard={() => setCurrentScreen('draft_board')} />
+      )}
+
       {/* DRAFT BOARD TAB */}
       {currentScreen === 'draft_board' && (
         <View style={styles.flexOne}>
+          {selectedDraft && selectedDraft.status !== 'confirmed' && teams.length > 0 && (
+            <View style={styles.card}>
+              <Text style={styles.draftSub}>
+                Round {roundForPick(teams.length, picks.length + 1)} • Pick #{picks.length + 1} •{' '}
+                {(selectedDraft.pick_order_type ?? 'snake') === 'snake' ? 'Snake' : 'Standard'} order
+              </Text>
+              <Text style={styles.cardTitle}>
+                On the clock: {teams[teamIndexForPick(teams.length, picks.length + 1, selectedDraft.pick_order_type ?? 'snake')]?.team_name}
+              </Text>
+            </View>
+          )}
           <FlatList
             data={picks.slice().reverse()}
             keyExtractor={(item) => item.id}
