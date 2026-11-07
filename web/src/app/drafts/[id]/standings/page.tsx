@@ -16,12 +16,17 @@ export default function StandingsPage({ params }: { params: Promise<{ id: string
   const [h2hB, setH2hB] = useState('');
   const [expandedTeamId, setExpandedTeamId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [statsError, setStatsError] = useState(false);
 
   const loadStandings = async () => {
     try {
       const res = await fetch(`/api/drafts/${draftId}/standings`);
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load standings');
       if (data.standings) {
+        setLoadError('');
+        setStatsError(Boolean(data.statsError));
         setStandings(data.standings);
         setDraft(data.draft);
         setPicks(data.picks);
@@ -31,8 +36,9 @@ export default function StandingsPage({ params }: { params: Promise<{ id: string
           setExpandedTeamId(data.standings[0].teamId);
         }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      setLoadError(err.message || 'Could not load standings');
     } finally {
       setLoading(false);
     }
@@ -42,8 +48,37 @@ export default function StandingsPage({ params }: { params: Promise<{ id: string
     loadStandings();
   }, [draftId]);
 
-  if (loading || !draft) {
+  const exportCsv = () => {
+    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+    const rows = [
+      ['Rank', 'Team', 'Owner', 'Active', 'IR', 'Cap Hit', 'Total Points'],
+      ...standings.map((s) => [s.rank, s.teamName, s.ownerName, s.activePlayersCount, s.irPlayersCount, s.totalCapHit, s.totalPoints]),
+    ];
+    const blob = new Blob([rows.map((r) => r.map(esc).join(',')).join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(draft?.name || 'standings').replace(/[^a-z0-9]+/gi, '-')}-standings.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (loading) {
     return <div className="p-8 text-center text-slate-400">Calculating standings...</div>;
+  }
+
+  if (!draft) {
+    return (
+      <div className="p-8 text-center space-y-3">
+        <p className="text-rose-300 text-sm">{loadError || 'Standings are not available for this draft.'}</p>
+        <button
+          onClick={() => { setLoading(true); loadStandings(); }}
+          className="bg-ice-600 hover:bg-ice-500 text-white font-semibold text-xs px-4 py-2 rounded-lg"
+        >
+          Try again
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -63,6 +98,12 @@ export default function StandingsPage({ params }: { params: Promise<{ id: string
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={exportCsv}
+            className="bg-rink-dark hover:bg-rink-border border border-rink-border text-slate-200 px-4 py-2 rounded-lg text-xs font-semibold transition"
+          >
+            ⬇ Export CSV
+          </button>
           <Link
             href={`/drafts/${draftId}`}
             className="bg-rink-dark hover:bg-rink-border border border-rink-border text-slate-200 px-4 py-2 rounded-lg text-xs font-semibold transition"
@@ -83,6 +124,14 @@ export default function StandingsPage({ params }: { params: Promise<{ id: string
           </Link>
         </div>
       </div>
+
+      {(statsError || loadError) && (
+        <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm rounded-lg">
+          {statsError
+            ? 'NHL stats are temporarily unavailable, so the points below may show as 0. Your picks are safe; check back in a few minutes.'
+            : `Couldn't refresh standings (${loadError}). Showing the last loaded data.`}
+        </div>
+      )}
 
       {/* Standings Table */}
       <div className="bg-rink-card border border-rink-border rounded-xl overflow-hidden shadow">

@@ -33,6 +33,13 @@ export default function PlayersPage() {
   // Sync state
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [syncReport, setSyncReport] = useState<{
+    missing: string[];
+    unmatched: { name: string; capHit: number; suggestion?: string }[];
+  } | null>(null);
+  const [salariesUpdatedAt, setSalariesUpdatedAt] = useState<string | null>(null);
+  const [statsWarning, setStatsWarning] = useState<string | null>(null);
+  const [onlyMissingSalary, setOnlyMissingSalary] = useState(false);
 
   const fetchPlayers = async () => {
     setLoading(true);
@@ -46,6 +53,8 @@ export default function PlayersPage() {
       setSalariesCount(data.salariesCount || 0);
       setOverrideIds(new Set<number>(data.overrideIds || []));
       setUpdatedAt(data.updatedAt || null);
+      setSalariesUpdatedAt(data.salariesUpdatedAt || null);
+      setStatsWarning(data.statsWarning || null);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -60,6 +69,7 @@ export default function PlayersPage() {
   // Trigger online salary sync from Spotrac
   const handleAutoSync = async () => {
     setSyncing(true);
+    setSyncReport(null);
     setSyncStatus('Fetching contracts from source and matching with NHL rosters...');
     try {
       const res = await fetch('/api/players', {
@@ -70,12 +80,9 @@ export default function PlayersPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to sync salaries');
       setSyncStatus(
-        `✓ Sync complete! Matched ${data.matchedCount} salaries. ${
-          data.missingPlayers?.length
-            ? `${data.missingPlayers.length} players still have no salary (click "—" to enter one): ${data.missingPlayers.slice(0, 15).join(', ')}${data.missingPlayers.length > 15 ? '…' : ''}`
-            : 'No players missing.'
-        }`
+        `✓ Sync complete! Matched ${data.matchedCount} salaries. ${data.missingPlayers?.length ?? 0} players have no salary and ${data.unmatchedCount ?? 0} contract names couldn't be matched to a player.`
       );
+      setSyncReport({ missing: data.missingPlayers ?? [], unmatched: data.unmatched ?? [] });
       fetchPlayers();
     } catch (err: any) {
       setSyncStatus(`Sync error: ${err.message}`);
@@ -162,6 +169,7 @@ export default function PlayersPage() {
   const filteredSkaters = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = skaters.filter((s) => {
+      if (onlyMissingSalary && s.capHit && s.capHit > 0) return false;
       if (!q) return true;
       return (
         s.skaterFullName.toLowerCase().includes(q) ||
@@ -188,12 +196,13 @@ export default function PlayersPage() {
       const numB = Number(b[skaterSortKey] ?? 0);
       return skaterSortAsc ? numA - numB : numB - numA;
     });
-  }, [skaters, search, skaterSortKey, skaterSortAsc]);
+  }, [skaters, search, skaterSortKey, skaterSortAsc, onlyMissingSalary]);
 
   // Filtered and sorted goalies
   const filteredGoalies = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = goalies.filter((g) => {
+      if (onlyMissingSalary && g.capHit && g.capHit > 0) return false;
       if (!q) return true;
       return (
         g.goalieFullName.toLowerCase().includes(q) ||
@@ -218,7 +227,13 @@ export default function PlayersPage() {
       const numB = Number(b[goalieSortKey] ?? 0);
       return goalieSortAsc ? numA - numB : numB - numA;
     });
-  }, [goalies, search, goalieSortKey, goalieSortAsc]);
+  }, [goalies, search, goalieSortKey, goalieSortAsc, onlyMissingSalary]);
+
+  const missingSalaryCount =
+    skaters.filter((s) => !(s.capHit && s.capHit > 0)).length +
+    goalies.filter((g) => !(g.capHit && g.capHit > 0)).length;
+  const hoursSince = (iso: string | null) => (iso ? (Date.now() - new Date(iso).getTime()) / 3_600_000 : null);
+  const salaryAge = hoursSince(salariesUpdatedAt);
 
   return (
     <div className="space-y-6">
@@ -229,8 +244,10 @@ export default function PlayersPage() {
             <span>🏒</span> NHL Players & Statistics
           </h1>
           <p className="text-sm text-slate-400 mt-1">
-            Current season NHL statistics with salary cap hits for skaters and goalies.
-            {updatedAt && ` Last updated ${new Date(updatedAt).toLocaleString()}.`}
+            Current season NHL statistics with salary cap hits for skaters and goalies. Players who haven&apos;t
+            played a game yet are listed with zero stats.
+            {updatedAt && ` Stats updated ${new Date(updatedAt).toLocaleString()}.`}
+            {salariesUpdatedAt && ` Salaries synced ${new Date(salariesUpdatedAt).toLocaleString()}.`}
           </p>
         </div>
 
@@ -256,9 +273,74 @@ export default function PlayersPage() {
         </div>
       )}
 
+      {syncReport && (syncReport.missing.length > 0 || syncReport.unmatched.length > 0) && (
+        <div className="p-3 bg-rink-card border border-rink-border text-xs text-slate-300 rounded-lg space-y-2">
+          {syncReport.missing.length > 0 && (
+            <details>
+              <summary className="cursor-pointer font-semibold">
+                {syncReport.missing.length} players with no salary (click a player&apos;s &ldquo;—&rdquo; to enter one)
+              </summary>
+              <p className="mt-1 text-slate-400">{syncReport.missing.join(', ')}</p>
+            </details>
+          )}
+          {syncReport.unmatched.length > 0 && (
+            <details>
+              <summary className="cursor-pointer font-semibold">
+                {syncReport.unmatched.length} contract names that couldn&apos;t be matched to an NHL player
+              </summary>
+              <ul className="mt-1 text-slate-400 list-disc pl-5">
+                {syncReport.unmatched.map((u) => (
+                  <li key={u.name}>
+                    {u.name} (${u.capHit.toFixed(2)}M){u.suggestion ? ` — closest: ${u.suggestion}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
+
+      {statsWarning && (
+        <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm rounded-lg">
+          {statsWarning} Last successful update: {updatedAt ? new Date(updatedAt).toLocaleString() : 'unknown'}.
+        </div>
+      )}
+
+      {!loading && !error && (salariesCount === 0 || missingSalaryCount > 0) && (
+        <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm rounded-lg flex flex-wrap items-center justify-between gap-2">
+          <span>
+            {salariesCount === 0
+              ? 'No salaries have been loaded yet.'
+              : `${missingSalaryCount} players have no salary on file.`}{' '}
+            Players with no salary count as $0.00M against a draft&apos;s cap.
+            {isAdmin
+              ? ' Run "Fetch & Sync Salaries", or click a player\'s "—" to enter one.'
+              : ' Your draft admin can set these.'}
+          </span>
+          {missingSalaryCount > 0 && (
+            <button
+              onClick={() => setOnlyMissingSalary((v) => !v)}
+              className="text-xs font-semibold underline hover:text-amber-200"
+            >
+              {onlyMissingSalary ? 'Show all players' : 'Show only players without a salary'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {!loading && !error && salaryAge !== null && salaryAge > 48 && (
+        <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm rounded-lg">
+          Salaries were last synced {new Date(salariesUpdatedAt!).toLocaleString()}. The daily sync may be failing
+          {isAdmin ? ' — try "Fetch & Sync Salaries" to see the error.' : '.'}
+        </div>
+      )}
+
       {error && (
-        <div className="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm rounded-lg">
-          {error}
+        <div className="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm rounded-lg flex items-center justify-between gap-3">
+          <span>{error}</span>
+          <button onClick={fetchPlayers} className="text-xs font-semibold underline hover:text-rose-200">
+            Try again
+          </button>
         </div>
       )}
 

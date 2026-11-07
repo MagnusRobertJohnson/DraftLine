@@ -74,7 +74,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   for (const email of emails) {
     const ok = await sendEmail(
       email,
-      `You're invited to join "${draft.name}" on HockeyPool`,
+      `You're invited to join "${draft.name}" on DraftLine`,
       `<p>${escapeHtml(inviterName)} invited you to join the hockey pool <strong>${escapeHtml(draft.name)}</strong>.</p>
        <p><a href="${link}">Join the pool</a></p>
        <p>Or sign in and enter invite code <strong>${draft.invite_code}</strong>.</p>`

@@ -50,7 +50,12 @@ export default function HomePage() {
         router.push(pendingJoin && inviteCode ? `/dashboard?join=${encodeURIComponent(inviteCode)}` : '/dashboard');
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Authentication failed');
+      const msg: string = err?.message || 'Authentication failed';
+      setErrorMsg(
+        /failed to fetch|networkerror|load failed/i.test(msg)
+          ? "Can't reach the DraftLine server. Check your internet connection and try again. If it persists, the service may be temporarily offline."
+          : msg
+      );
     } finally {
       setLoading(false);
     }

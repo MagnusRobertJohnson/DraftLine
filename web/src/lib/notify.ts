@@ -62,7 +62,7 @@ export async function notifyUsers(userIds: string[], payload: NotifyPayload): Pr
       await sendEmail(
         p.email,
         payload.title,
-        `<p>${escapeHtml(payload.title)}</p><p>${escapeHtml(payload.body ?? '')}</p><p><a href="${url}">Open HockeyPool</a></p>`
+        `<p>${escapeHtml(payload.title)}</p><p>${escapeHtml(payload.body ?? '')}</p><p><a href="${url}">Open DraftLine</a></p>`
       );
     }
   } catch (err) {

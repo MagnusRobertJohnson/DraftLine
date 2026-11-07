@@ -207,7 +207,7 @@ export default function SettingsPage() {
           </label>
         ))}
         <p className="text-xs text-slate-400">
-          Mobile push notifications are delivered once you sign in on the HockeyPool mobile app. Email
+          Mobile push notifications are delivered once you sign in on the DraftLine mobile app. Email
           notifications require email delivery to be enabled on the server.
         </p>
       </div>
