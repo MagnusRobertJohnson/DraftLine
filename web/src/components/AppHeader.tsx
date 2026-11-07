@@ -59,7 +59,7 @@ export default function AppHeader() {
         <a href="/" className="flex items-center gap-2">
           <span className="text-2xl">🏒</span>
           <span className="font-extrabold text-xl tracking-tight bg-gradient-to-r from-ice-300 via-rink-accent to-ice-100 bg-clip-text text-transparent">
-            HockeyPool
+            DraftLine
           </span>
         </a>
         <nav className="flex items-center gap-4 text-sm font-medium">

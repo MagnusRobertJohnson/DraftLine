@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getOptionalUserId, canManageDraft, logSuperAdminAction } from '@/lib/requireAdmin';
 import { notifyUsers, getDraftParticipantIds } from '@/lib/notify';
 import { getOrLockDraftSalaries } from '@/lib/salaries';
+import { teamIndexForPick } from '@shared/draftOrder';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,11 +37,35 @@ export async function POST(
     }
 
     if (action === 'make_pick') {
-      const { teamId, pickNumber, nhlPlayerId, playerName, position, team } = body;
+      const { teamId, pickNumber, nhlPlayerId, playerName, position, team, confirmNoSalary } = body;
+
+      // The pick must belong to the team that is actually on the clock
+      const { data: orderedTeams } = await supabaseAdmin
+        .from('draft_teams')
+        .select('id')
+        .eq('draft_id', draftId)
+        .order('draft_order', { ascending: true });
+      const expectedIdx = teamIndexForPick(orderedTeams?.length ?? 0, Number(pickNumber), draft.pick_order_type ?? 'snake');
+      if (expectedIdx < 0 || orderedTeams![expectedIdx].id !== teamId) {
+        return NextResponse.json(
+          { error: 'That team is not on the clock for this pick. Reload the page and try again.' },
+          { status: 409 }
+        );
+      }
 
       // Salaries are locked in for this draft at its first pick; the server decides the cap hit
       const lockedSalaries = await getOrLockDraftSalaries(draft);
       const capHit = lockedSalaries.get(Number(nhlPlayerId)) ?? 0;
+
+      if (draft.salary_cap_enabled && !(capHit > 0) && !confirmNoSalary) {
+        return NextResponse.json(
+          {
+            code: 'NO_SALARY',
+            error: `${playerName || 'This player'} has no salary on file, so they would count as $0.00M against the cap. Set a salary first, or confirm to draft them at $0.`,
+          },
+          { status: 409 }
+        );
+      }
 
       // Check if player is already drafted
       const { data: existingPick } = await supabaseAdmin

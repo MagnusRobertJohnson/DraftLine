@@ -17,7 +17,7 @@ export async function sendEmail(to: string, subject: string, html: string): Prom
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        from: process.env.EMAIL_FROM || 'HockeyPool <onboarding@resend.dev>',
+        from: process.env.EMAIL_FROM || 'DraftLine <onboarding@resend.dev>',
         to: [to],
         subject,
         html,

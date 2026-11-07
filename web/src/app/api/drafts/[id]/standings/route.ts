@@ -57,9 +57,10 @@ export async function GET(
 
     // Fetch live NHL stats
     const gameType = draft.season_type === 'playoffs' ? '3' : '2';
+    let statsError = false;
     const [skaters, goalies] = await Promise.all([
-      getSkaters(gameType, draft.season_id).catch(() => []),
-      getGoalies(gameType, draft.season_id).catch(() => []),
+      getSkaters(gameType, draft.season_id).catch(() => { statsError = true; return []; }),
+      getGoalies(gameType, draft.season_id).catch(() => { statsError = true; return []; }),
     ]);
 
     const playerMap = new Map<number, NHLSkater | NHLGoalie>();
@@ -94,6 +95,7 @@ export async function GET(
       picks: picksWithScores,
       weights,
       teamStyles,
+      statsError,
     });
   } catch (err: any) {
     return NextResponse.json({ error: err.message || 'Failed to compute standings' }, { status: 500 });

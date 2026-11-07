@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase/client';
 import type { Draft, DraftTeam, DraftPick, PlayerSalary } from '@shared/types';
 import { authHeaders } from '@/lib/clientAuth';
 import InvitePanel from '@/components/InvitePanel';
+import { teamIndexForPick, roundForPick } from '@shared/draftOrder';
 
 export default function AdminDraftPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: draftId } = use(params);
@@ -16,6 +17,9 @@ export default function AdminDraftPage({ params }: { params: Promise<{ id: strin
   const [picks, setPicks] = useState<DraftPick[]>([]);
   const [salaries, setSalaries] = useState<Map<number, number>>(new Map());
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const [salaryWarning, setSalaryWarning] = useState('');
+  const [hasSearched, setHasSearched] = useState(false);
 
   // Player search & selection state
   const [searchQuery, setSearchQuery] = useState('');
@@ -31,8 +35,12 @@ export default function AdminDraftPage({ params }: { params: Promise<{ id: strin
   const loadDraftData = async () => {
     try {
       // 1. Fetch draft
-      const { data: d } = await supabase.from('drafts').select('*').eq('id', draftId).single();
-      if (!d) return;
+      const { data: d, error: dErr } = await supabase.from('drafts').select('*').eq('id', draftId).single();
+      if (dErr || !d) {
+        setLoadError(dErr?.message || 'This draft could not be loaded. It may not exist, or you may not have access.');
+        return;
+      }
+      setLoadError('');
       setDraft(d as Draft);
 
       // 2. Fetch teams
@@ -54,15 +62,21 @@ export default function AdminDraftPage({ params }: { params: Promise<{ id: strin
       // 4. Fetch salaries (locked snapshot once the draft has started)
       const salRes = await fetch(`/api/drafts/${draftId}/salaries`, { headers: await authHeaders() });
       if (salRes.ok) {
+        setSalaryWarning('');
         const sj = await salRes.json();
         const smap = new Map<number, number>();
         for (const [pid, cap] of Object.entries(sj.salaries as Record<string, number>)) {
           smap.set(Number(pid), Number(cap));
         }
         setSalaries(smap);
+      } else {
+        setSalaryWarning(
+          'Salaries could not be loaded, so cap hits below may show as $0.00M. Reload the page; if it keeps happening, check the Players page.'
+        );
       }
     } catch (err: any) {
       console.error(err);
+      setLoadError(`Could not reach the server (${err.message}). Check your connection and try again.`);
     } finally {
       setLoading(false);
     }
@@ -95,51 +109,132 @@ export default function AdminDraftPage({ params }: { params: Promise<{ id: strin
     };
   }, [draftId]);
 
-  // Determine which team picks next based on snake order
+  // Determine which team picks next (snake or linear, per the draft's setting)
   const totalRounds = draft
     ? draft.forwards_count + draft.defense_count + draft.goalies_count + draft.injured_reserve_count
     : 15;
   const currentPickNumber = picks.length + 1;
   const numTeams = teams.length;
+  const orderType = draft?.pick_order_type ?? 'snake';
+  const orderLocked = !draft || draft.status !== 'setup' || picks.length > 0;
 
-  let currentTeam: DraftTeam | null = null;
-  let currentRound = 1;
+  const currentRound = roundForPick(numTeams, currentPickNumber);
+  const currentTeam: DraftTeam | null = teams[teamIndexForPick(numTeams, currentPickNumber, orderType)] || null;
 
-  if (numTeams > 0) {
-    currentRound = Math.floor((currentPickNumber - 1) / numTeams) + 1;
-    const pickInRound = (currentPickNumber - 1) % numTeams;
-    const isReverseRound = currentRound % 2 === 0;
-    const teamIndex = isReverseRound ? numTeams - 1 - pickInRound : pickInRound;
-    currentTeam = teams[teamIndex] || null;
-  }
+  const updateOrder = async (payload: Record<string, unknown>) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/order`, {
+        method: 'POST',
+        headers: await authHeaders(),
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to update the pick order');
+      await loadDraftData();
+    } catch (err: any) {
+      setErrorMsg(err.message);
+    }
+  };
+
+  const moveTeam = (index: number, delta: number) => {
+    const target = index + delta;
+    if (target < 0 || target >= teams.length) return;
+    const ids = teams.map((t) => t.id);
+    [ids[index], ids[target]] = [ids[target], ids[index]];
+    updateOrder({ action: 'set_order', teamIds: ids });
+  };
+
+  const handleRandomize = () => {
+    if (teams.length < 2) return;
+    if (!confirm('Randomize the pick order? This replaces the current order.')) return;
+    updateOrder({ action: 'randomize' });
+  };
 
   // Handle player search
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!searchQuery.trim()) return;
+    const q = searchQuery.trim();
+    if (!q) return;
     setSearching(true);
     setErrorMsg('');
+    setHasSearched(false);
 
+    let results: any[] = [];
+    let nhlSearchFailed = false;
     try {
-      const gameType = draft?.season_type === 'playoffs' ? '3' : '2';
       // Search from NHL public search API
       const res = await fetch(
-        `https://search.d3.nhle.com/api/v1/search/player?culture=en-us&limit=20&q=${encodeURIComponent(
-          searchQuery.trim()
-        )}&active=true`
+        `https://search.d3.nhle.com/api/v1/search/player?culture=en-us&limit=20&q=${encodeURIComponent(q)}&active=true`
       );
       if (!res.ok) throw new Error('Search failed');
-      const results = await res.json();
-      setSearchResults(results || []);
+      results = (await res.json()) || [];
+    } catch {
+      nhlSearchFailed = true;
+    }
+
+    // Fall back to our own player list, which also includes rostered players with no games played yet
+    if (results.length === 0) {
+      try {
+        const res = await fetch('/api/players', { headers: await authHeaders() });
+        if (res.ok) {
+          const data = await res.json();
+          const needle = q.toLowerCase();
+          results = [
+            ...(data.skaters || []).map((s: any) => ({
+              playerId: s.playerId, name: s.skaterFullName, positionCode: s.positionCode, teamAbbrev: s.teamAbbrevs,
+            })),
+            ...(data.goalies || []).map((g: any) => ({
+              playerId: g.playerId, name: g.goalieFullName, positionCode: 'G', teamAbbrev: g.teamAbbrevs,
+            })),
+          ]
+            .filter((p) => p.name.toLowerCase().includes(needle))
+            .slice(0, 20);
+          nhlSearchFailed = false;
+        }
+      } catch {
+        // keep the original failure state
+      }
+    }
+
+    if (nhlSearchFailed && results.length === 0) {
+      setErrorMsg(
+        "Player search isn't responding right now (the NHL search service may be down or blocked on this network). Try again in a moment."
+      );
+    }
+    setSearchResults(results);
+    setHasSearched(!nhlSearchFailed || results.length > 0);
+    setSearching(false);
+  };
+
+  // Set a missing salary for this draft
+  const handleSetSalary = async (player: any) => {
+    const input = window.prompt(`Cap hit for ${player.name} in $M (e.g. 0.95):`);
+    if (input === null) return;
+    const capHit = parseFloat(input);
+    if (!Number.isFinite(capHit) || capHit < 0 || capHit >= 10000) {
+      setErrorMsg('Enter a valid cap hit in millions, e.g. 0.95');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/drafts/${draftId}/salaries`, {
+        method: 'PUT',
+        headers: await authHeaders(),
+        body: JSON.stringify({ playerId: Number(player.playerId), playerName: player.name, capHit }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Failed to save salary');
+      setErrorMsg('');
+      setSuccessMsg(`Set ${player.name}'s cap hit to $${capHit.toFixed(2)}M.`);
+      loadDraftData();
     } catch (err: any) {
-      setErrorMsg('Error searching NHL players: ' + err.message);
-    } finally {
-      setSearching(false);
+      setErrorMsg(err.message);
     }
   };
 
   // Submit pick
-  const handleSelectPlayer = async (player: any) => {
+  const handleSelectPlayer = async (player: any, confirmNoSalary = false) => {
     if (!currentTeam || !draft) return;
     setSubmittingPick(true);
     setErrorMsg('');
@@ -159,15 +254,24 @@ export default function AdminDraftPage({ params }: { params: Promise<{ id: strin
           playerName: player.name,
           position: player.positionCode || 'F',
           team: player.teamAbbrev || 'NHL',
+          confirmNoSalary,
         }),
       });
 
       const json = await res.json();
+      if (res.status === 409 && json.code === 'NO_SALARY') {
+        setSubmittingPick(false);
+        if (window.confirm(`${json.error}\n\nOK = draft at $0.00M. Cancel = go back (use "Set salary" first).`)) {
+          return await handleSelectPlayer(player, true);
+        }
+        return;
+      }
       if (!res.ok) throw new Error(json.error || 'Failed to make pick');
 
       setSuccessMsg(`Picked ${player.name} for ${currentTeam.team_name}!`);
       setSearchQuery('');
       setSearchResults([]);
+      setHasSearched(false);
       loadDraftData();
     } catch (err: any) {
       setErrorMsg(err.message);
@@ -238,11 +342,36 @@ export default function AdminDraftPage({ params }: { params: Promise<{ id: strin
     }
   };
 
-  if (loading || !draft) {
+  if (loading) {
     return <div className="p-8 text-center text-slate-400">Loading draft console...</div>;
   }
 
+  if (!draft) {
+    return (
+      <div className="p-8 text-center space-y-3">
+        <p className="text-rose-300 text-sm">{loadError || 'This draft could not be loaded.'}</p>
+        <button
+          onClick={() => { setLoading(true); loadDraftData(); }}
+          className="bg-ice-600 hover:bg-ice-500 text-white font-semibold text-xs px-4 py-2 rounded-lg"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
   const draftedPlayerIds = new Set(picks.map((p) => p.nhl_player_id));
+
+  const checklist = [
+    { done: teams.length >= 2, label: 'Add at least 2 teams', hint: 'Use "+ Add" in the Draft Teams panel.' },
+    {
+      done: salaries.size > 0,
+      label: 'Salaries loaded',
+      hint: 'Open the Players page and run "Fetch & Sync Salaries".',
+    },
+    { done: draft.status !== 'setup' || picks.length > 0, label: 'Draft started', hint: 'Make the first pick.' },
+  ];
+  const showChecklist = draft.status === 'setup' && checklist.some((c) => !c.done);
 
   return (
     <div className="space-y-6">
@@ -287,6 +416,26 @@ export default function AdminDraftPage({ params }: { params: Promise<{ id: strin
       {successMsg && (
         <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm rounded-lg">
           {successMsg}
+        </div>
+      )}
+
+      {salaryWarning && (
+        <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm rounded-lg">
+          {salaryWarning}
+        </div>
+      )}
+
+      {showChecklist && (
+        <div className="bg-rink-card border border-rink-border p-4 rounded-xl">
+          <h3 className="text-sm font-bold text-slate-100 mb-2">Before you start drafting</h3>
+          <ul className="space-y-1 text-xs">
+            {checklist.map((c) => (
+              <li key={c.label} className={c.done ? 'text-emerald-400' : 'text-slate-300'}>
+                {c.done ? '✓' : '○'} {c.label}
+                {!c.done && <span className="text-slate-500"> — {c.hint}</span>}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -338,6 +487,13 @@ export default function AdminDraftPage({ params }: { params: Promise<{ id: strin
                 </button>
               </form>
 
+              {hasSearched && !searching && searchResults.length === 0 && (
+                <div className="text-xs text-slate-400 bg-rink-dark border border-rink-border rounded-lg p-3">
+                  No active players found for &ldquo;{searchQuery}&rdquo;. Try just the last name, or check the
+                  spelling. Players who haven&apos;t been added to NHL rosters yet won&apos;t appear.
+                </div>
+              )}
+
               {/* Search Results Drawer */}
               {searchResults.length > 0 && (
                 <div className="bg-rink-dark border border-rink-border rounded-lg max-h-72 overflow-y-auto divide-y divide-rink-border/50">
@@ -362,8 +518,21 @@ export default function AdminDraftPage({ params }: { params: Promise<{ id: strin
                             <span className="text-xs text-slate-400">{player.teamAbbrev}</span>
                           </div>
                           {draft.salary_cap_enabled && (
-                            <div className="text-xs font-mono text-emerald-400 mt-0.5">
-                              Cap: ${capHit.toFixed(2)}M
+                            <div className="text-xs font-mono mt-0.5">
+                              {capHit > 0 ? (
+                                <span className="text-emerald-400">Cap: ${capHit.toFixed(2)}M</span>
+                              ) : (
+                                <span className="text-amber-400">
+                                  Salary unknown{' '}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSetSalary(player)}
+                                    className="underline hover:text-amber-300"
+                                  >
+                                    Set salary
+                                  </button>
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
@@ -409,11 +578,73 @@ export default function AdminDraftPage({ params }: { params: Promise<{ id: strin
                 <span>
                   #{idx + 1}. {t.team_name}
                 </span>
-                <span className="text-[10px] text-slate-400">
-                  {picks.filter((p) => p.draft_team_id === t.id).length} picks
+                <span className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-slate-400">
+                    {picks.filter((p) => p.draft_team_id === t.id).length} picks
+                  </span>
+                  {!orderLocked && teams.length > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => moveTeam(idx, -1)}
+                        disabled={idx === 0}
+                        aria-label={`Move ${t.team_name} up`}
+                        className="px-1.5 rounded bg-rink-border hover:bg-slate-600 disabled:opacity-30"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveTeam(idx, 1)}
+                        disabled={idx === teams.length - 1}
+                        aria-label={`Move ${t.team_name} down`}
+                        className="px-1.5 rounded bg-rink-border hover:bg-slate-600 disabled:opacity-30"
+                      >
+                        ▼
+                      </button>
+                    </>
+                  )}
                 </span>
               </div>
             ))}
+          </div>
+
+          <div className="pt-2 border-t border-rink-border space-y-2">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Pick order</div>
+            <div className="flex bg-rink-dark border border-rink-border rounded-lg p-1 w-fit">
+              {(['snake', 'linear'] as const).map((type) => (
+                <button
+                  key={type}
+                  type="button"
+                  disabled={orderLocked}
+                  onClick={() => orderType !== type && updateOrder({ action: 'set_type', type })}
+                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition disabled:cursor-not-allowed ${
+                    orderType === type ? 'bg-ice-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  {type === 'snake' ? 'Snake' : 'Standard'}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-500">
+              {orderType === 'snake'
+                ? 'Snake: 1st→last in odd rounds, last→1st in even rounds.'
+                : 'Standard: 1st→last in every round.'}
+            </p>
+            {!orderLocked ? (
+              <button
+                type="button"
+                onClick={handleRandomize}
+                disabled={teams.length < 2}
+                className="bg-ice-600 hover:bg-ice-500 disabled:opacity-40 text-white font-semibold text-xs px-3 py-1.5 rounded"
+              >
+                🎲 Randomize order
+              </button>
+            ) : (
+              <p className="text-[11px] text-amber-300">
+                Order is locked once picks start. Undo all picks to change it.
+              </p>
+            )}
           </div>
 
           {draft.status === 'setup' && (

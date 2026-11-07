@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
 import { authHeaders } from '@/lib/clientAuth';
 import type { Draft, Profile, SubscriptionTier } from '@shared/types';
+import { CURRENT_SEASON } from '@shared/nhl';
 
 function DashboardContent() {
   const router = useRouter();
@@ -123,7 +124,7 @@ function DashboardContent() {
         .from('drafts')
         .insert({
           admin_id: profile.id,
-          season_id: '20262027',
+          season_id: CURRENT_SEASON,
           name: draftName,
           season_type: seasonType,
           forwards_count: Number(forwardsCount),

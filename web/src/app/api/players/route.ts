@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { getSkaters, getGoalies, CURRENT_SEASON } from '@shared/nhl';
+import { getSkaters, getGoalies, getRosterPlayers, CURRENT_SEASON } from '@shared/nhl';
 import { fetchSpotracSalaries, matchSalariesWithNHL } from '@shared/salary';
 import { authenticateAdmin, getOptionalUserId } from '@/lib/requireAdmin';
 
@@ -10,10 +10,34 @@ export const maxDuration = 120;
 const STATS_MAX_AGE_MS = 60 * 60 * 1000; // refresh stats at most once an hour
 
 async function refreshStatsCache(season: string, gameType: '2' | '3') {
-  const [skaters, goalies] = await Promise.all([
+  const [statSkaters, statGoalies, roster] = await Promise.all([
     getSkaters(gameType, season),
     getGoalies(gameType, season),
+    season === CURRENT_SEASON ? getRosterPlayers() : Promise.resolve([]),
   ]);
+  const skaters = [...statSkaters];
+  const goalies = [...statGoalies];
+
+  // Add rostered players who haven't played yet so they can still be found and priced
+  const known = new Set<number>([...skaters.map((s) => s.playerId), ...goalies.map((g) => g.playerId)]);
+  for (const p of roster) {
+    if (known.has(p.playerId)) continue;
+    known.add(p.playerId);
+    if (p.positionCode === 'G') {
+      goalies.push({
+        playerId: p.playerId, goalieFullName: p.fullName, teamAbbrevs: p.teamAbbrev, gamesPlayed: 0,
+        wins: 0, losses: 0, otLosses: 0, shutouts: 0, shotsAgainst: 0, goalsAgainst: 0,
+        goalsAgainstAverage: 0, savePct: 0, goals: 0, assists: 0, points: 0,
+      });
+    } else {
+      skaters.push({
+        playerId: p.playerId, skaterFullName: p.fullName, positionCode: p.positionCode, teamAbbrevs: p.teamAbbrev,
+        gamesPlayed: 0, goals: 0, assists: 0, points: 0, plusMinus: 0, penaltyMinutes: 0,
+        blockedShots: 0, hits: 0, shots: 0, otGoals: 0,
+      });
+    }
+  }
+
   const updatedAt = new Date().toISOString();
   const { error } = await supabaseAdmin.from('player_stats_cache').upsert(
     { season_id: season, game_type: gameType, skaters, goalies, updated_at: updatedAt },
@@ -39,8 +63,9 @@ export async function GET(request: NextRequest) {
         .maybeSingle(),
       supabaseAdmin
         .from('player_salaries')
-        .select('nhl_player_id, cap_hit')
-        .eq('season_id', season),
+        .select('nhl_player_id, cap_hit, updated_at')
+        .eq('season_id', season)
+        .range(0, 4999),
     ]);
 
     let stats: { skaters: any[]; goalies: any[]; updatedAt: string } | null = cacheRes.data
@@ -51,19 +76,25 @@ export async function GET(request: NextRequest) {
         }
       : null;
 
+    let statsWarning: string | null = null;
     const stale = !stats || Date.now() - new Date(stats.updatedAt).getTime() > STATS_MAX_AGE_MS;
     if (stale) {
       try {
         stats = await refreshStatsCache(season, gameType);
       } catch (err) {
         console.error('Stats refresh failed, serving saved snapshot if any:', err);
+        statsWarning = 'The NHL stats service could not be reached, so these numbers may be out of date.';
       }
     }
-    if (!stats) throw new Error('Player stats are unavailable right now');
+    if (!stats) throw new Error('Player stats are unavailable right now. The NHL stats service could not be reached; please try again in a few minutes.');
 
     const salaryMap = new Map<number, number>();
+    let salariesUpdatedAt: string | null = null;
     for (const row of salariesRes.data ?? []) {
       salaryMap.set(row.nhl_player_id, Number(row.cap_hit));
+      if (row.updated_at && (!salariesUpdatedAt || row.updated_at > salariesUpdatedAt)) {
+        salariesUpdatedAt = row.updated_at;
+      }
     }
 
     // Admins also see their own overrides on top of the shared values
@@ -89,6 +120,8 @@ export async function GET(request: NextRequest) {
       salariesCount: salaryMap.size,
       overrideIds,
       updatedAt: stats.updatedAt,
+      salariesUpdatedAt,
+      statsWarning,
     });
   } catch (err: any) {
     console.error('Players API error:', err);
@@ -105,10 +138,10 @@ export async function POST(request: NextRequest) {
     const seasonId = body.seasonId || CURRENT_SEASON;
 
     // 1. Fetch live salary entries directly from Spotrac across pages
-    const salaryEntries = await fetchSpotracSalaries();
+    const salaryEntries = await fetchSpotracSalaries(String(Number(seasonId.slice(0, 4))));
     if (salaryEntries.length === 0) {
       return NextResponse.json(
-        { error: 'No contract records returned from source. Spotrac may be temporarily unreachable.' },
+        { error: 'No contract records came back from Spotrac (it may be down, blocking requests, or have changed its page layout). Existing salaries were left unchanged. You can still set salaries by hand by clicking a player\'s cap hit.' },
         { status: 502 }
       );
     }
@@ -146,6 +179,11 @@ export async function POST(request: NextRequest) {
 
     const coveredIds = new Set(matchResult.matched.map((m) => m.playerId));
     const missingPlayers = nhlPlayers.filter((p) => !coveredIds.has(p.id)).map((p) => p.fullName);
+    const unmatched = matchResult.unmatched.map((u) => ({
+      name: u.sourceName,
+      capHit: u.capHit,
+      suggestion: u.bestMatch?.playerName,
+    }));
 
     return NextResponse.json({
       success: true,
@@ -153,6 +191,7 @@ export async function POST(request: NextRequest) {
       matchedCount: matchResult.matched.length,
       unmatchedCount: matchResult.unmatched.length,
       missingPlayers,
+      unmatched,
     });
   } catch (err: any) {
     console.error('Salary sync error:', err);
