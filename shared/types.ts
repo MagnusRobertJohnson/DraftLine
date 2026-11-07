@@ -46,7 +46,7 @@ export interface Draft {
   salary_cap_amount: number; // In millions e.g. 88.0
   current_pick: number;
   max_teams: number;
-  created_at: string;
+  pick_order_type?: 'snake' | 'linear';
   updated_at: string;
 }
 
