@@ -36,6 +36,7 @@ export default function PlayersScreen({ isAdmin, onBack }: { isAdmin: boolean; o
 
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState(false);
   const [syncReport, setSyncReport] = useState<{ missing: string[]; unmatched: { name: string; capHit: number; suggestion?: string }[] } | null>(null);
   const [showReport, setShowReport] = useState(false);
 
@@ -110,6 +111,7 @@ export default function PlayersScreen({ isAdmin, onBack }: { isAdmin: boolean; o
 
   const sync = async () => {
     setSyncing(true);
+    setSyncError(false);
     setSyncReport(null);
     setSyncStatus('Fetching contracts from source and matching with NHL rosters...');
     try {
@@ -122,6 +124,7 @@ export default function PlayersScreen({ isAdmin, onBack }: { isAdmin: boolean; o
       setSyncReport({ missing: d.missingPlayers ?? [], unmatched: d.unmatched ?? [] });
       load();
     } catch (e: any) {
+      setSyncError(true);
       setSyncStatus(`Sync error: ${e.message}`);
     } finally {
       setSyncing(false);
@@ -185,8 +188,8 @@ export default function PlayersScreen({ isAdmin, onBack }: { isAdmin: boolean; o
       </Text>
 
       {syncStatus && (
-        <View style={[ui.banner, ui.bannerOk, { marginTop: 12 }]}>
-          <Text style={ui.okText}>{syncStatus}</Text>
+        <View style={[ui.banner, syncError ? ui.bannerError : ui.bannerOk, { marginTop: 12 }]}>
+          <Text style={syncError ? ui.errorText : ui.okText}>{syncStatus}</Text>
           {syncReport && (syncReport.missing.length > 0 || syncReport.unmatched.length > 0) && (
             <TouchableOpacity onPress={() => setShowReport((v) => !v)}>
               <Text style={[ui.link, { marginTop: 6 }]}>{showReport ? 'Hide details' : 'Show details'}</Text>

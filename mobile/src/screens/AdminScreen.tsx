@@ -5,6 +5,7 @@ import { api, friendlyNetworkError } from '../lib/api';
 import { ui } from '../lib/theme';
 import type { Draft, DraftTeam, DraftPick } from '../../../shared/types';
 import { teamIndexForPick, roundForPick } from '../../../shared/draftOrder';
+import InvitePanel from './InvitePanel';
 
 const confirmAsync = (title: string, message: string, okLabel = 'OK') =>
   new Promise<boolean>((resolve) =>
@@ -297,6 +298,7 @@ export default function AdminScreen({ draftId, onOpenBoard }: { draftId: string;
       {errorMsg ? <View style={[ui.banner, ui.bannerError]}><Text style={ui.errorText}>{errorMsg}</Text></View> : null}
       {successMsg ? <View style={[ui.banner, ui.bannerOk]}><Text style={ui.okText}>{successMsg}</Text></View> : null}
       {salaryWarning ? <View style={[ui.banner, ui.bannerWarn]}><Text style={ui.warnText}>{salaryWarning}</Text></View> : null}
+      <InvitePanel draft={draft} />
 
       {showChecklist && (
         <View style={ui.card}>

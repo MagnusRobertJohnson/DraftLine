@@ -14,13 +14,18 @@ import {
 } from 'react-native';
 import { supabase } from './src/lib/supabase';
 import type { Draft, DraftTeam, DraftPick, Profile } from '../shared/types';
-import { validateRosterSwap, normalizePositionGroup, getNextEasternMidnight } from '../shared/roster-validation';
 import { teamIndexForPick, roundForPick } from '../shared/draftOrder';
 import { mergeDrafts } from './src/lib/drafts';
-import { fetchIsPaidAdmin, friendlyNetworkError } from './src/lib/api';
+import { friendlyNetworkError } from './src/lib/api';
 import PlayersScreen from './src/screens/PlayersScreen';
 import StandingsScreen from './src/screens/StandingsScreen';
 import AdminScreen from './src/screens/AdminScreen';
+import CreateDraftScreen from './src/screens/CreateDraftScreen';
+import ProfileScreen from './src/screens/ProfileScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
+import RosterScreen from './src/screens/RosterScreen';
+import ChatScreen from './src/screens/ChatScreen';
+import NotificationsScreen from './src/screens/NotificationsScreen';
 
 export default function App() {
   const [sessionUser, setSessionUser] = useState<any>(null);
@@ -34,8 +39,7 @@ export default function App() {
   const [authError, setAuthError] = useState('');
 
   // Dashboard / Navigation
-  const [currentScreen, setCurrentScreen] = useState<'dashboard' | 'draft_board' | 'roster_ir' | 'admin_console' | 'standings' | 'players'>('dashboard');
-  const [isPaidAdmin, setIsPaidAdmin] = useState(false);
+  const [currentScreen, setCurrentScreen] = useState<'dashboard' | 'draft_board' | 'roster_ir' | 'admin_console' | 'standings' | 'players' | 'create_draft' | 'profile' | 'settings' | 'chat' | 'notifications'>('dashboard');
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [selectedDraft, setSelectedDraft] = useState<Draft | null>(null);
 
@@ -48,10 +52,6 @@ export default function App() {
   const [joinCode, setJoinCode] = useState('');
   const [joinTeamName, setJoinTeamName] = useState('');
 
-  // IR Swap state
-  const [selectedActiveIds, setSelectedActiveIds] = useState<string[]>([]);
-  const [selectedIrIds, setSelectedIrIds] = useState<string[]>([]);
-
   // Check auth
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -63,16 +63,25 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSessionUser(session?.user ?? null);
       if (session?.user) loadUserProfile(session.user.id);
+      else {
+        setProfile(null);
+        setDrafts([]);
+        setSelectedDraft(null);
+        setCurrentScreen('dashboard');
+      }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
   const loadUserProfile = async (userId: string) => {
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    if (error) {
+      Alert.alert('Could not load profile', error.message);
+      return;
+    }
     if (data) setProfile(data as Profile);
     loadDrafts(userId);
-    fetchIsPaidAdmin(userId).then(setIsPaidAdmin).catch(() => setIsPaidAdmin(false));
   };
 
   const loadDrafts = async (userId: string) => {
@@ -133,7 +142,8 @@ export default function App() {
     setCurrentScreen('draft_board');
   };
 
-  const canAdminSelected = !!selectedDraft && !!sessionUser && selectedDraft.admin_id === sessionUser.id;
+  const isPaidAdmin = !!profile?.is_super_admin || profile?.subscription_tier === 'admin_basic' || profile?.subscription_tier === 'admin_top';
+  const canAdminSelected = !!selectedDraft && !!sessionUser && (selectedDraft.admin_id === sessionUser.id || !!profile?.is_super_admin);
 
   // Real-time Pick Updates for Mobile
   useEffect(() => {
@@ -253,6 +263,30 @@ export default function App() {
     );
   }
 
+  if (currentScreen === 'create_draft' || currentScreen === 'profile' || currentScreen === 'settings' || currentScreen === 'notifications') {
+    return <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      {currentScreen === 'create_draft' && isPaidAdmin && <CreateDraftScreen userId={sessionUser.id}
+        onBack={() => setCurrentScreen('dashboard')}
+        onCreated={(draft) => { loadDrafts(sessionUser.id); openDraft(draft).then(() => setCurrentScreen('admin_console')); }} />}
+      {currentScreen === 'profile' && <ProfileScreen userId={sessionUser.id} onBack={() => setCurrentScreen('dashboard')} onSettings={() => setCurrentScreen('settings')} />}
+      {currentScreen === 'settings' && <SettingsScreen userId={sessionUser.id} onBack={() => setCurrentScreen('dashboard')} onProfileChanged={() => loadUserProfile(sessionUser.id)} />}
+      {currentScreen === 'notifications' && <NotificationsScreen userId={sessionUser.id} onBack={() => setCurrentScreen('dashboard')} onOpen={async (link) => {
+        const join = /^\/dashboard\?join=([A-Za-z0-9]+)/.exec(link);
+        if (join) { setJoinCode(join[1]); setCurrentScreen('dashboard'); return; }
+        const match = /^\/drafts\/([^/?#]+)(?:\/(standings|roster|admin|chat))?/.exec(link);
+        if (!match) { Alert.alert('Link unavailable', 'This notification cannot be opened in the mobile app yet.'); return; }
+        const { data, error } = await supabase.from('drafts').select('*').eq('id', match[1]).single();
+        if (error || !data) { Alert.alert('Unable to open draft', error?.message || 'Draft not found.'); return; }
+        await openDraft(data as Draft);
+        if (match[2] === 'standings') setCurrentScreen('standings');
+        else if (match[2] === 'roster') setCurrentScreen('roster_ir');
+        else if (match[2] === 'chat') setCurrentScreen('chat');
+        else if (match[2] === 'admin' && data.admin_id === sessionUser.id) setCurrentScreen('admin_console');
+      }} />}
+    </SafeAreaView>;
+  }
+
   // SCREEN 2: DASHBOARD
   if (currentScreen === 'dashboard') {
     return (
@@ -269,9 +303,27 @@ export default function App() {
         </View>
 
         <ScrollView style={styles.body}>
-          <TouchableOpacity style={styles.secondaryButton} onPress={() => setCurrentScreen('players')}>
-            <Text style={styles.secondaryButtonText}>🏒 NHL Players & Salaries</Text>
-          </TouchableOpacity>
+          <View style={styles.dashboardActions}>
+            <View style={styles.dashboardActionRow}>
+              <TouchableOpacity style={[styles.secondaryButton, styles.dashboardAction, styles.dashboardActionFill]} onPress={() => setCurrentScreen('profile')}>
+                <Text style={styles.secondaryButtonText}>Profile</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.secondaryButton, styles.dashboardAction, styles.dashboardActionFill]} onPress={() => setCurrentScreen('settings')}>
+                <Text style={styles.secondaryButtonText}>Settings</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.dashboardActionRow}>
+              {isPaidAdmin && <TouchableOpacity style={[styles.primaryButton, styles.dashboardAction, styles.dashboardActionFill]} onPress={() => setCurrentScreen('create_draft')}>
+                <Text style={styles.dashboardPrimaryText}>Create draft</Text>
+              </TouchableOpacity>}
+              <TouchableOpacity style={[styles.secondaryButton, styles.dashboardAction, styles.dashboardActionFill]} onPress={() => setCurrentScreen('notifications')}>
+                <Text style={styles.secondaryButtonText}>Notifications</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={[styles.secondaryButton, styles.dashboardAction]} onPress={() => setCurrentScreen('players')}>
+              <Text style={styles.secondaryButtonText}>🏒 NHL Players & Salaries</Text>
+            </TouchableOpacity>
+          </View>
 
           {/* Join Draft Box */}
           <View style={styles.card}>
@@ -333,7 +385,10 @@ export default function App() {
       </View>
 
       {/* Tabs */}
-      <View style={styles.tabBar}>
+      <ScrollView horizontal showsHorizontalScrollIndicator style={styles.tabBar} contentContainerStyle={{ flexDirection: 'row' }}>
+        <TouchableOpacity style={[styles.tabItem, currentScreen === 'chat' && styles.tabActive]} onPress={() => setCurrentScreen('chat')}>
+          <Text style={[styles.tabText, currentScreen === 'chat' && styles.tabTextActive]}>Chat</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.tabItem, currentScreen === 'standings' && styles.tabActive]}
           onPress={() => setCurrentScreen('standings')}
@@ -365,9 +420,10 @@ export default function App() {
             My Team & IR
           </Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
 
       {currentScreen === 'standings' && selectedDraft && <StandingsScreen draftId={selectedDraft.id} />}
+      {currentScreen === 'chat' && selectedDraft && <ChatScreen draftId={selectedDraft.id} userId={sessionUser.id} />}
       {currentScreen === 'admin_console' && selectedDraft && canAdminSelected && (
         <AdminScreen draftId={selectedDraft.id} onOpenBoard={() => setCurrentScreen('draft_board')} />
       )}
@@ -416,40 +472,7 @@ export default function App() {
       )}
 
       {/* ROSTER & IR TAB */}
-      {currentScreen === 'roster_ir' && (
-        <ScrollView style={styles.flexOne}>
-          {!userTeam ? (
-            <Text style={styles.emptyText}>You do not have a team in this draft.</Text>
-          ) : (
-            <View style={styles.body}>
-              <Text style={styles.sectionHeader}>{userTeam.team_name}</Text>
-              <Text style={styles.draftSub}>Manage Active & IR Roster Swaps</Text>
-
-              {/* Active Players */}
-              <Text style={[styles.cardTitle, { marginTop: 15 }]}>Active Roster</Text>
-              {picks
-                .filter((p) => p.draft_team_id === userTeam.id && p.roster_status === 'active')
-                .map((p) => (
-                  <View key={p.id} style={styles.rosterRow}>
-                    <Text style={styles.pickPlayer}>{p.player_name} ({p.player_position})</Text>
-                    <Text style={styles.pickDetails}>{p.player_team}</Text>
-                  </View>
-                ))}
-
-              {/* IR Players */}
-              <Text style={[styles.cardTitle, { marginTop: 15 }]}>Injured Reserve (IR)</Text>
-              {picks
-                .filter((p) => p.draft_team_id === userTeam.id && p.roster_status === 'ir')
-                .map((p) => (
-                  <View key={p.id} style={styles.rosterRow}>
-                    <Text style={styles.pickPlayer}>{p.player_name} ({p.player_position})</Text>
-                    <Text style={[styles.pickDetails, { color: '#fbbf24' }]}>IR</Text>
-                  </View>
-                ))}
-            </View>
-          )}
-        </ScrollView>
-      )}
+      {currentScreen === 'roster_ir' && selectedDraft && <RosterScreen draft={selectedDraft} team={userTeam} picks={picks} refresh={() => refreshDraft(selectedDraft.id)} />}
     </SafeAreaView>
   );
 }
@@ -539,6 +562,29 @@ const styles = StyleSheet.create({
   body: {
     padding: 16,
   },
+  dashboardActions: {
+    gap: 10,
+    marginBottom: 20,
+  },
+  dashboardActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  dashboardAction: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    marginTop: 0,
+  },
+  dashboardActionFill: {
+    flex: 1,
+  },
+  dashboardPrimaryText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
   card: {
     backgroundColor: '#1C2541',
     padding: 16,
@@ -621,13 +667,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   tabBar: {
-    flexDirection: 'row',
+    flexGrow: 0,
     borderBottomWidth: 1,
     borderBottomColor: '#3A506B',
     backgroundColor: '#1C2541',
   },
   tabItem: {
-    flex: 1,
+    paddingHorizontal: 14,
     paddingVertical: 12,
     alignItems: 'center',
   },
