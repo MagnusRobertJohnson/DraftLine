@@ -303,23 +303,27 @@ export default function App() {
         </View>
 
         <ScrollView style={styles.body}>
-          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-            <TouchableOpacity style={[styles.secondaryButton, { flex: 1 }]} onPress={() => setCurrentScreen('profile')}>
-              <Text style={styles.secondaryButtonText}>Profile</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.secondaryButton, { flex: 1 }]} onPress={() => setCurrentScreen('settings')}>
-              <Text style={styles.secondaryButtonText}>Settings</Text>
+          <View style={styles.dashboardActions}>
+            <View style={styles.dashboardActionRow}>
+              <TouchableOpacity style={[styles.secondaryButton, styles.dashboardAction, styles.dashboardActionFill]} onPress={() => setCurrentScreen('profile')}>
+                <Text style={styles.secondaryButtonText}>Profile</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.secondaryButton, styles.dashboardAction, styles.dashboardActionFill]} onPress={() => setCurrentScreen('settings')}>
+                <Text style={styles.secondaryButtonText}>Settings</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.dashboardActionRow}>
+              {isPaidAdmin && <TouchableOpacity style={[styles.primaryButton, styles.dashboardAction, styles.dashboardActionFill]} onPress={() => setCurrentScreen('create_draft')}>
+                <Text style={styles.dashboardPrimaryText}>Create draft</Text>
+              </TouchableOpacity>}
+              <TouchableOpacity style={[styles.secondaryButton, styles.dashboardAction, styles.dashboardActionFill]} onPress={() => setCurrentScreen('notifications')}>
+                <Text style={styles.secondaryButtonText}>Notifications</Text>
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={[styles.secondaryButton, styles.dashboardAction]} onPress={() => setCurrentScreen('players')}>
+              <Text style={styles.secondaryButtonText}>🏒 NHL Players & Salaries</Text>
             </TouchableOpacity>
           </View>
-          {isPaidAdmin && <TouchableOpacity style={styles.primaryButton} onPress={() => setCurrentScreen('create_draft')}>
-            <Text style={styles.primaryButtonText}>Create draft</Text>
-          </TouchableOpacity>}
-          <TouchableOpacity style={styles.secondaryButton} onPress={() => setCurrentScreen('notifications')}>
-            <Text style={styles.secondaryButtonText}>Notifications</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryButton} onPress={() => setCurrentScreen('players')}>
-            <Text style={styles.secondaryButtonText}>🏒 NHL Players & Salaries</Text>
-          </TouchableOpacity>
 
           {/* Join Draft Box */}
           <View style={styles.card}>
@@ -557,6 +561,29 @@ const styles = StyleSheet.create({
   },
   body: {
     padding: 16,
+  },
+  dashboardActions: {
+    gap: 10,
+    marginBottom: 20,
+  },
+  dashboardActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  dashboardAction: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    marginTop: 0,
+  },
+  dashboardActionFill: {
+    flex: 1,
+  },
+  dashboardPrimaryText: {
+    color: '#ffffff',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
   card: {
     backgroundColor: '#1C2541',
