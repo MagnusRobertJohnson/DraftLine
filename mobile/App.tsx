@@ -16,6 +16,7 @@ import { supabase } from './src/lib/supabase';
 import type { Draft, DraftTeam, DraftPick, Profile } from '../shared/types';
 import { validateRosterSwap, normalizePositionGroup, getNextEasternMidnight } from '../shared/roster-validation';
 import { teamIndexForPick, roundForPick } from '../shared/draftOrder';
+import { mergeDrafts } from './src/lib/drafts';
 import { fetchIsPaidAdmin, friendlyNetworkError } from './src/lib/api';
 import PlayersScreen from './src/screens/PlayersScreen';
 import StandingsScreen from './src/screens/StandingsScreen';
@@ -81,11 +82,8 @@ export default function App() {
       .select('drafts(*)')
       .eq('user_id', userId);
 
-    const allDrafts: Draft[] = [
-      ...(managed || []),
-      ...((joined || []).map((j: any) => j.drafts).filter(Boolean)),
-    ];
-    setDrafts(allDrafts);
+    const joinedDrafts: Draft[] = (joined || []).map((j: any) => j.drafts).filter(Boolean);
+    setDrafts(mergeDrafts(managed || [], joinedDrafts));
   };
 
   // Auth Submit

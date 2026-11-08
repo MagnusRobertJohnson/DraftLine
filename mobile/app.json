@@ -4,11 +4,7 @@
     "slug": "hockeypool",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "splash": {
-      "backgroundColor": "#0B132B"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.hockeypool.app"
@@ -18,6 +14,14 @@
         "backgroundColor": "#0B132B"
       },
       "package": "com.hockeypool.app"
-    }
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0B132B"
+        }
+      ]
+    ]
   }
 }
