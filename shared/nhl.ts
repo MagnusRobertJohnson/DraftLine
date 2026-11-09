@@ -77,12 +77,24 @@ export class NhlRateLimitError extends Error {
 
 async function fetchStatsPage(url: string): Promise<Response> {
   for (let attempt = 0; attempt < 3; attempt++) {
+    const startedAt = Date.now();
     const res = await fetch(url, { cache: 'no-store' });
     if (res.status !== 429) return res;
-    if (attempt === 2) throw new NhlRateLimitError();
     const header = res.headers.get('retry-after');
     const seconds = header === null ? NaN : Number(header);
     const date = header === null ? NaN : Date.parse(header);
+    const requestUrl = new URL(url);
+    const pageStart = requestUrl.searchParams.get('start');
+    console.warn('NHL stats rate limit', {
+      endpoint: requestUrl.pathname,
+      pageStart: pageStart !== null && /^\d+$/.test(pageStart) ? Number(pageStart) : null,
+      status: res.status,
+      attempt: attempt + 1,
+      durationMs: Date.now() - startedAt,
+      retryAfter: header === null ? null : Number.isFinite(seconds) ? seconds
+        : Number.isFinite(date) ? new Date(date).toUTCString() : 'invalid',
+    });
+    if (attempt === 2) throw new NhlRateLimitError();
     const delay = Number.isFinite(seconds) ? Math.max(0, seconds * 1000)
       : Number.isFinite(date) ? Math.max(0, date - Date.now())
       : 1000 * (attempt + 1);
