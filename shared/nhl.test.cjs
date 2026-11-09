@@ -80,3 +80,27 @@ test('logs safe rate-limit diagnostics before stopping for a long retry-after', 
     console.warn = originalWarn;
   }
 });
+
+test('logs successful stats requests without their query strings', async () => {
+  const originalFetch = global.fetch;
+  const originalInfo = console.info;
+  const events = [];
+  global.fetch = async () => Response.json({ data: [], total: 0 });
+  console.info = (...args) => events.push(args);
+  try {
+    assert.deepEqual(await getGoalies('2', '20952096'), []);
+    assert.equal(events.length, 1);
+    assert.equal(events[0][0], 'NHL stats request succeeded');
+    const details = events[0][1];
+    assert.equal(details.endpoint, '/stats/rest/en/goalie/summary');
+    assert.equal(details.pageStart, 0);
+    assert.equal(details.status, 200);
+    assert.equal(details.attempt, 1);
+    assert.ok(Number.isFinite(Date.parse(details.startedAt)));
+    assert.ok(details.durationMs >= 0);
+    assert.equal(JSON.stringify(details).includes('20952096'), false);
+  } finally {
+    global.fetch = originalFetch;
+    console.info = originalInfo;
+  }
+});
