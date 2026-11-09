@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
-import { getSkaters, getGoalies, getRosterPlayers, CURRENT_SEASON } from '@shared/nhl';
+import { getSkaters, getGoalies, getRosterPlayers, CURRENT_SEASON, NhlRateLimitError } from '@shared/nhl';
 import { fetchSpotracSalaries, matchSalariesWithNHL } from '@shared/salary';
 import { authenticateAdmin, getOptionalUserId } from '@/lib/requireAdmin';
 
@@ -67,6 +67,8 @@ export async function GET(request: NextRequest) {
         .eq('season_id', season)
         .range(0, 4999),
     ]);
+    if (cacheRes.error) throw cacheRes.error;
+    if (salariesRes.error) throw salariesRes.error;
 
     let stats: { skaters: any[]; goalies: any[]; updatedAt: string } | null = cacheRes.data
       ? {
@@ -83,10 +85,12 @@ export async function GET(request: NextRequest) {
         stats = await refreshStatsCache(season, gameType);
       } catch (err) {
         console.error('Stats refresh failed, serving saved snapshot if any:', err);
-        statsWarning = 'The NHL stats service could not be reached, so these numbers may be out of date.';
+        statsWarning = err instanceof NhlRateLimitError
+          ? 'The NHL stats service is rate limiting requests, so these numbers may be out of date. Try again later.'
+          : 'The NHL stats service could not be reached, so these numbers may be out of date.';
       }
     }
-    if (!stats) throw new Error('Player stats are unavailable right now. The NHL stats service could not be reached; please try again in a few minutes.');
+    if (!stats) throw new Error(`Player stats are unavailable right now. ${statsWarning || 'Please try again in a few minutes.'}`);
 
     const salaryMap = new Map<number, number>();
     let salariesUpdatedAt: string | null = null;
@@ -196,8 +200,10 @@ export async function POST(request: NextRequest) {
   } catch (err: any) {
     console.error('Salary sync error:', err);
     return NextResponse.json(
-      { error: err.message || 'Failed to sync salaries' },
-      { status: 500 }
+      { error: err instanceof NhlRateLimitError
+        ? `${err.message} No salaries were updated.`
+        : err.message || 'Failed to sync salaries' },
+      { status: err instanceof NhlRateLimitError ? 503 : 500 }
     );
   }
 }
