@@ -104,3 +104,32 @@ test('logs successful stats requests without their query strings', async () => {
     console.info = originalInfo;
   }
 });
+
+test('waits for all skater summary pages before requesting realtime stats', async () => {
+  const originalFetch = global.fetch;
+  const requests = [];
+  let releaseSummary;
+  const summary = new Promise((resolve) => { releaseSummary = resolve; });
+  global.fetch = async (url) => {
+    requests.push(String(url));
+    if (String(url).includes('/summary?')) {
+      if (new URL(url).searchParams.get('start') === '0') return summary;
+      return Response.json({ data: [{ playerId: 101 }], total: 101 });
+    }
+    return Response.json({ data: [], total: 0 });
+  };
+  try {
+    const loading = getSkaters('2', '20942095');
+    await Promise.resolve();
+    assert.equal(requests.length, 1);
+    assert.match(requests[0], /\/skater\/summary\?/);
+    releaseSummary(Response.json({ data: Array.from({ length: 100 }, (_, index) => ({ playerId: index + 1 })), total: 101 }));
+    await loading;
+    assert.equal(requests.length, 3);
+    assert.match(requests[1], /\/skater\/summary\?/);
+    assert.equal(new URL(requests[1]).searchParams.get('start'), '100');
+    assert.match(requests[2], /\/skater\/realtime\?/);
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
