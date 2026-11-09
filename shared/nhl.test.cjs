@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { getSkaters, NhlRateLimitError } = require('./nhl.ts');
+const { getSkaters, getGoalies, NhlRateLimitError } = require('./nhl.ts');
 
 test('reports rate limits after bounded retries', async () => {
   const originalFetch = global.fetch;
@@ -54,5 +54,29 @@ test('does not silently replace unavailable realtime statistics with zeroes', as
   } finally {
     global.fetch = originalFetch;
     global.setTimeout = originalTimeout;
+  }
+});
+
+test('logs safe rate-limit diagnostics before stopping for a long retry-after', async () => {
+  const originalFetch = global.fetch;
+  const originalWarn = console.warn;
+  const events = [];
+  global.fetch = async () => new Response('', { status: 429, headers: { 'retry-after': '30' } });
+  console.warn = (...args) => events.push(args);
+  try {
+    await assert.rejects(getGoalies('2', '20962097'), NhlRateLimitError);
+    assert.equal(events.length, 1);
+    assert.equal(events[0][0], 'NHL stats rate limit');
+    const details = events[0][1];
+    assert.equal(details.endpoint, '/stats/rest/en/goalie/summary');
+    assert.equal(details.status, 429);
+    assert.equal(details.pageStart, 0);
+    assert.equal(details.attempt, 1);
+    assert.equal(details.retryAfter, 30);
+    assert.ok(details.durationMs >= 0);
+    assert.equal(JSON.stringify(details).includes('20962097'), false);
+  } finally {
+    global.fetch = originalFetch;
+    console.warn = originalWarn;
   }
 });
