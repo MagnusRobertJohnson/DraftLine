@@ -68,12 +68,36 @@ function buildGoalieSummaryUrl(gameTypeId: GameTypeId, season: string) {
   return `https://api.nhle.com/stats/rest/en/goalie/summary?isAggregate=false&isGame=false&sort=%5B%7B%22property%22:%22wins%22,%22direction%22:%22DESC%22%7D%5D&cayenneExp=${filter}`;
 }
 
+export class NhlRateLimitError extends Error {
+  constructor() {
+    super('The NHL stats service is rate limiting requests. Please wait a few minutes and try again.');
+    this.name = 'NhlRateLimitError';
+  }
+}
+
+async function fetchStatsPage(url: string): Promise<Response> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const res = await fetch(url, { cache: 'no-store' });
+    if (res.status !== 429) return res;
+    if (attempt === 2) throw new NhlRateLimitError();
+    const header = res.headers.get('retry-after');
+    const seconds = header === null ? NaN : Number(header);
+    const date = header === null ? NaN : Date.parse(header);
+    const delay = Number.isFinite(seconds) ? Math.max(0, seconds * 1000)
+      : Number.isFinite(date) ? Math.max(0, date - Date.now())
+      : 1000 * (attempt + 1);
+    if (delay > 5000) throw new NhlRateLimitError();
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  throw new NhlRateLimitError();
+}
+
 async function fetchAllPages(baseUrl: string, pageSize = 100): Promise<Record<string, any>[]> {
   let start = 0;
   const all: Record<string, any>[] = [];
 
   while (true) {
-    const res = await fetch(`${baseUrl}&start=${start}&limit=${pageSize}`, { cache: 'no-store' });
+    const res = await fetchStatsPage(`${baseUrl}&start=${start}&limit=${pageSize}`);
     if (!res.ok) {
       throw new Error(`NHL API error: ${res.status} from ${baseUrl}`);
     }
@@ -116,7 +140,7 @@ export async function getSkaters(
 
   const [summaryRows, realtimeRows] = await Promise.all([
     fetchAllPages(buildSkaterSummaryUrl(gameTypeId, season)),
-    fetchAllPages(buildSkaterRealtimeUrl(gameTypeId, season)).catch(() => []),
+    fetchAllPages(buildSkaterRealtimeUrl(gameTypeId, season)),
   ]);
 
   const realtimeMap = new Map<number, { hits?: number; blockedShots?: number }>();
