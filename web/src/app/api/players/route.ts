@@ -10,11 +10,9 @@ export const maxDuration = 120;
 const STATS_MAX_AGE_MS = 60 * 60 * 1000; // refresh stats at most once an hour
 
 async function refreshStatsCache(season: string, gameType: '2' | '3') {
-  const [statSkaters, statGoalies, roster] = await Promise.all([
-    getSkaters(gameType, season),
-    getGoalies(gameType, season),
-    season === CURRENT_SEASON ? getRosterPlayers() : Promise.resolve([]),
-  ]);
+  const statSkaters = await getSkaters(gameType, season);
+  const statGoalies = await getGoalies(gameType, season);
+  const roster = season === CURRENT_SEASON ? await getRosterPlayers() : [];
   const skaters = [...statSkaters];
   const goalies = [...statGoalies];
 

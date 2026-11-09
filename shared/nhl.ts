@@ -157,10 +157,8 @@ export async function getSkaters(
     return skaterCache.data;
   }
 
-  const [summaryRows, realtimeRows] = await Promise.all([
-    fetchAllPages(buildSkaterSummaryUrl(gameTypeId, season)),
-    fetchAllPages(buildSkaterRealtimeUrl(gameTypeId, season)),
-  ]);
+  const summaryRows = await fetchAllPages(buildSkaterSummaryUrl(gameTypeId, season));
+  const realtimeRows = await fetchAllPages(buildSkaterRealtimeUrl(gameTypeId, season));
 
   const realtimeMap = new Map<number, { hits?: number; blockedShots?: number }>();
   for (const r of realtimeRows) {
