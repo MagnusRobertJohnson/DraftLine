@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
 import { getStoredTheme, setTheme, type ThemePref } from '@/lib/theme';
 import type { Profile } from '@shared/types';
+import { PLANS } from '@shared/plans';
 
 const PREF_ROWS = [
   { key: 'invites', label: 'Draft invitations', desc: 'When an admin invites you to a draft.' },
@@ -209,14 +210,31 @@ export default function SettingsPage() {
 
       <div className={card}>
         <h2 className="font-bold text-slate-100">Plan</h2>
-        <p className="text-sm text-slate-300">
-          {profile.is_super_admin ? 'Super admin' : profile.subscription_tier === 'free'
-            ? 'Free member: join drafts by invitation.'
-            : 'Admin: create up to 5 drafts per season.'}
+        <p className="text-xs text-amber-300">
+          Admin and Admin Pro are one-time purchases. Purchasing is not available yet.
         </p>
-        {profile.subscription_tier === 'free' && !profile.is_super_admin && (
-          <p className="text-xs text-amber-300">Purchasing admin access is not available yet.</p>
-        )}
+        <div className="space-y-2">
+          {PLANS.map((p) => {
+            const current = !profile.is_super_admin && profile.subscription_tier === p.tier;
+            return (
+              <div
+                key={p.tier}
+                className={`flex items-center justify-between gap-3 p-3 rounded-lg border ${
+                  current ? 'border-ice-500 bg-ice-900/30' : 'border-rink-border'
+                }`}
+              >
+                <div>
+                  <div className="text-slate-100 font-semibold text-sm">{p.name}</div>
+                  <div className="text-slate-400 text-xs">{p.description}</div>
+                </div>
+                {current ? (
+                  <span className="text-ice-300 text-xs font-semibold">Current plan</span>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+        {profile.is_super_admin && <p className="text-sm text-amber-300">Current access: Super admin (unlimited drafts).</p>}
       </div>
 
       <div className={card}>
