@@ -249,10 +249,8 @@ function DashboardContent() {
     profile?.subscription_tier === 'admin_top';
   const tierLabel = profile?.is_super_admin
     ? 'Meta-Admin (Unlimited)'
-    : profile?.subscription_tier === 'admin_top'
-      ? 'Top Admin (Up to 15 drafts)'
-      : profile?.subscription_tier === 'admin_basic'
-      ? 'Basic Admin (Up to 3 drafts)'
+    : profile?.subscription_tier === 'admin_top' || profile?.subscription_tier === 'admin_basic'
+      ? 'Admin (Up to 5 drafts per season)'
       : 'Standard Member (Free)';
 
   return (
