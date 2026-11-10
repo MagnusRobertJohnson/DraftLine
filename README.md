@@ -37,6 +37,8 @@ A modern, multi-tenant fantasy hockey draft pool platform engineered for both **
      - CSV / Spreadsheet drag & drop import with automated fuzzy player name matching.
      - Direct in-app manual salary overrides.
      - Centralized multi-season salary registry.
+   - Ambiguous name matches are saved for administrator review on web and mobile, with player position and season statistics to help identify players. Pending shared salaries are unknown until reviewed; source salaries are possibilities, not verified recommendations.
+   - Shared review decisions survive automatic syncs while the matching source data is unchanged. Personal overrides still take precedence for their owner, and locked draft salaries are not changed.
 
 ---
 
@@ -73,7 +75,10 @@ HockeyPool.Public/
 2. Open the **SQL Editor** in your Supabase dashboard.
 3. Run the contents of [`supabase/schema.sql`](/supabase/schema.sql).
 4. Run the contents of [`supabase/functions.sql`](/supabase/functions.sql).
-5. Copy your **Project URL**, **Anon Key**, and **Service Role Key** from **Project Settings** ➔ **API**.
+5. Run [`supabase/salary_ambiguity_review.sql`](./supabase/salary_ambiguity_review.sql).
+6. Copy your **Project URL**, **Anon Key**, and **Service Role Key** from **Project Settings** ➔ **API**.
+
+For an existing database, run only `salary_ambiguity_review.sql` in the SQL Editor before deploying the updated web application; do not rerun the full schema. After a salary sync, administrators can open **Review players** on the players screen to confirm a previous shared salary, choose a source salary, enter a shared correction, or mark each player unknown. If the underlying ambiguous source data changes, that group requires review again.
 
 ### 2. Running the Web Application
 ```bash

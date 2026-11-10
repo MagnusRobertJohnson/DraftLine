@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import type { NHLSkater, NHLGoalie } from '@shared/types';
 import { authHeaders, fetchIsAdmin } from '@/lib/clientAuth';
+import SalaryReviews from './SalaryReviews';
 
 type PlayerTab = 'skaters' | 'goalies';
 type SkaterSortKey = keyof NHLSkater | 'capHit';
@@ -32,6 +33,7 @@ export default function PlayersPage() {
 
   // Sync state
   const [syncing, setSyncing] = useState(false);
+  const [reviewRefresh, setReviewRefresh] = useState(0);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [syncReport, setSyncReport] = useState<{
     missing: string[];
@@ -80,8 +82,9 @@ export default function PlayersPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to sync salaries');
       setSyncStatus(
-        `✓ Sync complete! Matched ${data.matchedCount} salaries. ${data.missingPlayers?.length ?? 0} players have no salary and ${data.unmatchedCount ?? 0} contract names couldn't be matched to a player.`
+        `✓ Sync complete! Matched ${data.matchedCount} salaries. ${data.pendingReviewCount ?? 0} ambiguous groups need review. ${data.missingPlayers?.length ?? 0} players have no shared salary and ${data.unmatchedCount ?? 0} contract names couldn't be matched.`
       );
+      setReviewRefresh((n) => n + 1);
       setSyncReport({ missing: data.missingPlayers ?? [], unmatched: data.unmatched ?? [] });
       fetchPlayers();
     } catch (err: any) {
@@ -272,6 +275,7 @@ export default function PlayersPage() {
           </button>
         </div>
       )}
+      {isAdmin && <SalaryReviews refresh={reviewRefresh} onSaved={fetchPlayers} />}
 
       {syncReport && (syncReport.missing.length > 0 || syncReport.unmatched.length > 0) && (
         <div className="p-3 bg-rink-card border border-rink-border text-xs text-slate-300 rounded-lg space-y-2">
