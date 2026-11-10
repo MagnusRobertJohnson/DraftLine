@@ -3,6 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase/admin';
 import { getSkaters, getGoalies, getRosterPlayers, CURRENT_SEASON, NhlRateLimitError } from '@shared/nhl';
 import { fetchSpotracSalaries, matchSalariesWithNHL } from '@shared/salary';
 import { authenticateAdmin, getOptionalUserId } from '@/lib/requireAdmin';
+import { createHash } from 'node:crypto';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
@@ -136,6 +137,7 @@ export async function POST(request: NextRequest) {
   const auth = await authenticateAdmin(request, { allowCron: true });
   if (auth.error) return auth.error;
   try {
+    const startedAt = new Date().toISOString();
     const body = await request.json().catch(() => ({}));
     const seasonId = body.seasonId || CURRENT_SEASON;
 
@@ -158,28 +160,39 @@ export async function POST(request: NextRequest) {
 
     // 3. Match salaries to players using exact and fuzzy matching
     const matchResult = matchSalariesWithNHL(salaryEntries, nhlPlayers);
-
-    // 4. Upsert the shared automatic salaries (admin overrides live in their own table)
-    const rows = matchResult.matched.map((m) => ({
-      season_id: seasonId,
-      nhl_player_id: m.playerId,
-      player_name: m.playerName,
-      cap_hit: m.capHit,
-      source: 'spotrac',
-      updated_at: new Date().toISOString(),
-    }));
-
-    if (rows.length > 0) {
-      for (let i = 0; i < rows.length; i += 100) {
-        const batch = rows.slice(i, i + 100);
-        const { error: upsertErr } = await supabaseAdmin
-          .from('player_salaries')
-          .upsert(batch, { onConflict: 'season_id,nhl_player_id' });
-        if (upsertErr) throw upsertErr;
-      }
+    const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+    const groups = matchResult.ambiguous.map((group) => {
+      const details = {
+        players: [...group.players].sort((a, b) => a.id - b.id),
+        salaries: [...group.salaries].sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))),
+      };
+      return {
+        key: hash(details.players.map((p) => p.id).join(',')),
+        fingerprint: hash(JSON.stringify(details)),
+        details,
+      };
+    });
+    const { data: applied, error: syncError } = await supabaseAdmin.rpc('apply_salary_sync', {
+      p_season: seasonId, p_started_at: startedAt, p_matches: matchResult.matched, p_groups: groups,
+    });
+    if (syncError) throw syncError;
+    if (!applied) {
+      return NextResponse.json({ error: 'A newer salary sync has already finished. Reload the player list.' }, { status: 409 });
     }
 
-    const coveredIds = new Set(matchResult.matched.map((m) => m.playerId));
+    const [reviewResult, salariesResult] = await Promise.all([
+      supabaseAdmin.from('salary_match_reviews').select('*', { count: 'exact', head: true })
+        .eq('season_id', seasonId).eq('status', 'pending'),
+      supabaseAdmin.from('player_salaries').select('nhl_player_id, cap_hit')
+        .eq('season_id', seasonId).range(0, 4999),
+    ]);
+    if (reviewResult.error || salariesResult.error) {
+      console.error('Salary sync committed but report could not be loaded:', reviewResult.error || salariesResult.error);
+      return NextResponse.json({ error: 'Salaries were updated, but the sync report could not be loaded. Reload the player list.' }, { status: 500 });
+    }
+
+    const coveredIds = new Set((salariesResult.data ?? [])
+      .filter((row) => Number(row.cap_hit) > 0).map((row) => Number(row.nhl_player_id)));
     const missingPlayers = nhlPlayers.filter((p) => !coveredIds.has(p.id)).map((p) => p.fullName);
     const unmatched = matchResult.unmatched.map((u) => ({
       name: u.sourceName,
@@ -191,6 +204,7 @@ export async function POST(request: NextRequest) {
       success: true,
       totalSourceEntries: salaryEntries.length,
       matchedCount: matchResult.matched.length,
+      pendingReviewCount: reviewResult.count ?? 0,
       unmatchedCount: matchResult.unmatched.length,
       missingPlayers,
       unmatched,
