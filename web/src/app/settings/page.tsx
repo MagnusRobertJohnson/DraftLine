@@ -4,15 +4,9 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase/client';
-import { authHeaders } from '@/lib/clientAuth';
 import { getStoredTheme, setTheme, type ThemePref } from '@/lib/theme';
 import type { Profile } from '@shared/types';
-
-const PLANS = [
-  { tier: 'free', name: 'Free member', desc: 'Join unlimited drafts by invitation.' },
-  { tier: 'admin_basic', name: 'Basic admin', desc: 'Create and run up to 3 drafts per season.' },
-  { tier: 'admin_top', name: 'Top admin', desc: 'Create and run up to 15 drafts per season.' },
-];
+import { PLANS } from '@shared/plans';
 
 const PREF_ROWS = [
   { key: 'invites', label: 'Draft invitations', desc: 'When an admin invites you to a draft.' },
@@ -101,18 +95,6 @@ export default function SettingsPage() {
     if (err) return flash(err.message, true);
     setNewEmail('');
     flash('Check both your old and new inboxes to confirm the change.');
-  };
-
-  const changePlan = async (tier: string) => {
-    const res = await fetch('/api/account/plan', {
-      method: 'POST',
-      headers: await authHeaders(),
-      body: JSON.stringify({ tier }),
-    });
-    const json = await res.json();
-    if (!res.ok) return flash(json.error, true);
-    flash('Plan updated.');
-    load();
   };
 
   const signOut = async () => {
@@ -229,11 +211,11 @@ export default function SettingsPage() {
       <div className={card}>
         <h2 className="font-bold text-slate-100">Plan</h2>
         <p className="text-xs text-amber-300">
-          Payments are not connected yet. Plan changes below take effect immediately for testing.
+          Admin and Admin Pro are one-time purchases. Purchasing is not available yet.
         </p>
         <div className="space-y-2">
           {PLANS.map((p) => {
-            const current = profile.subscription_tier === p.tier;
+            const current = !profile.is_super_admin && profile.subscription_tier === p.tier;
             return (
               <div
                 key={p.tier}
@@ -243,22 +225,16 @@ export default function SettingsPage() {
               >
                 <div>
                   <div className="text-slate-100 font-semibold text-sm">{p.name}</div>
-                  <div className="text-slate-400 text-xs">{p.desc}</div>
+                  <div className="text-slate-400 text-xs">{p.description}</div>
                 </div>
                 {current ? (
                   <span className="text-ice-300 text-xs font-semibold">Current plan</span>
-                ) : (
-                  <button
-                    onClick={() => changePlan(p.tier)}
-                    className="bg-ice-600 hover:bg-ice-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
-                  >
-                    {p.tier === 'free' ? 'Switch' : 'Upgrade'}
-                  </button>
-                )}
+                ) : null}
               </div>
             );
           })}
         </div>
+        {profile.is_super_admin && <p className="text-sm text-amber-300">Current access: Super admin (unlimited drafts).</p>}
       </div>
 
       <div className={card}>

@@ -6,12 +6,13 @@ A modern, multi-tenant fantasy hockey draft pool platform engineered for both **
 
 ## 🌟 Key Features
 
-1. **Multi-Tenant Email Authentication & Subscriptions**
+1. **Multi-Tenant Email Authentication & Plans**
    - Individual user accounts via email & password.
    - **General Users (Free):** Join unlimited drafts via invite code / link, manage their own team, view live draft boards, and monitor standings.
    - **Administrators (Tiered):**
-     - **Basic Tier:** Create & manage up to **3 drafts** per NHL season.
-     - **Top Tier:** Create & manage up to **15 drafts** per NHL season.
+     - **Admin:** Create & manage up to **3 drafts** per NHL season.
+     - **Admin Pro:** Create & manage up to **15 drafts** per NHL season.
+     - Each is intended as a one-time purchase. Online purchasing is not connected yet.
      - Quota enforcement built directly into Supabase database triggers.
 
 2. **Per-Draft Customization & Isolation**
@@ -79,6 +80,8 @@ HockeyPool.Public/
 6. Copy your **Project URL**, **Anon Key**, and **Service Role Key** from **Project Settings** ➔ **API**.
 
 For an existing database, run only `salary_ambiguity_review.sql` in the SQL Editor before deploying the updated web application; do not rerun the full schema. After a salary sync, administrators can open **Review players** on the players screen to confirm a previous shared salary, choose a source salary, enter a shared correction, or mark each player unknown. If the underlying ambiguous source data changes, that group requires review again.
+
+For the Admin and Admin Pro limits and privilege protection, run [`supabase/admin_tier_limits.sql`](./supabase/admin_tier_limits.sql) on an existing database. Before running it, verify that your profile is the only existing super admin; it stops without changes if there are zero or multiple super admins. It preserves current tier values and super-admin access. The limits apply per season; deleting a draft frees a slot. The internal profile values `admin_basic` and `admin_top` correspond to Admin and Admin Pro. The temporary self-upgrade endpoint is disabled, but Polar and RevenueCat purchase verification is not implemented.
 
 ### 2. Running the Web Application
 ```bash

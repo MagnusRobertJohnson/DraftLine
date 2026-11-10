@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase/client';
 import { authHeaders } from '@/lib/clientAuth';
-import type { Draft, Profile, SubscriptionTier } from '@shared/types';
+import type { Draft, Profile } from '@shared/types';
 import { CURRENT_SEASON } from '@shared/nhl';
 
 function DashboardContent() {
@@ -250,9 +250,9 @@ function DashboardContent() {
   const tierLabel = profile?.is_super_admin
     ? 'Meta-Admin (Unlimited)'
     : profile?.subscription_tier === 'admin_top'
-      ? 'Top Admin (Up to 15 drafts)'
+      ? 'Admin Pro (Up to 15 drafts per season)'
       : profile?.subscription_tier === 'admin_basic'
-      ? 'Basic Admin (Up to 3 drafts)'
+      ? 'Admin (Up to 3 drafts per season)'
       : 'Standard Member (Free)';
 
   return (

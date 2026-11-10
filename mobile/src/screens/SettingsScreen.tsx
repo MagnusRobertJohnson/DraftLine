@@ -3,6 +3,7 @@ import { ScrollView, Switch, Text, TextInput, TouchableOpacity, View } from 'rea
 import { supabase } from '../lib/supabase';
 import { ui } from '../lib/theme';
 import type { Profile } from '../../../shared/types';
+import { PLANS, planName } from '../../../shared/plans';
 
 type SettingsProfile = Profile & {
   backup_email: string | null;
@@ -104,7 +105,12 @@ export default function SettingsScreen({ userId, onBack, onProfileChanged }: {
           <Text style={ui.text}>{label}</Text><Switch value={!!prefs[key]} onValueChange={(value) => savePreference(key, value)} />
         </View>)}
       </View>
-      <View style={ui.card}><Text style={ui.cardTitle}>Your plan</Text><Text style={ui.text}>{profile.is_super_admin ? 'Super admin' : profile.subscription_tier}</Text></View>
+      <View style={ui.card}>
+        <Text style={ui.cardTitle}>Your plan</Text>
+        <Text style={ui.text}>{profile.is_super_admin ? 'Super admin (unlimited drafts)' : planName(profile.subscription_tier)}</Text>
+        {PLANS.map((plan) => <Text key={plan.tier} style={[ui.sub, { marginTop: 6 }]}>{plan.name}: {plan.description}</Text>)}
+        <Text style={[ui.sub, { marginTop: 8 }]}>Admin and Admin Pro are one-time purchases. Purchasing is not available yet.</Text>
+      </View>
     </>}
   </ScrollView>;
 }

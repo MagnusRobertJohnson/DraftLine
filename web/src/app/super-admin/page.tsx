@@ -123,8 +123,8 @@ export default function SuperAdminPage() {
                     className="bg-rink-dark border border-rink-border rounded-lg px-2 py-1 text-slate-100"
                   >
                     <option value="free">Free member</option>
-                    <option value="admin_basic">Basic admin (3 drafts)</option>
-                    <option value="admin_top">Top admin (15 drafts)</option>
+                    <option value="admin_basic">Admin (3 drafts per season)</option>
+                    <option value="admin_top">Admin Pro (15 drafts per season)</option>
                   </select>
                 )}
               </div>
