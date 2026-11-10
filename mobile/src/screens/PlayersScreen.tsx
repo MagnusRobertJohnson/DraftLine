@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, ScrollView, ActivityIndicator, Modal } from 'react-native';
 import { api } from '../lib/api';
 import { ui } from '../lib/theme';
+import SalaryReviews from './SalaryReviews';
 
 type Tab = 'skaters' | 'goalies';
 
@@ -35,6 +36,7 @@ export default function PlayersScreen({ isAdmin, onBack }: { isAdmin: boolean; o
   const [sortAsc, setSortAsc] = useState(false);
 
   const [syncing, setSyncing] = useState(false);
+  const [reviewRefresh, setReviewRefresh] = useState(0);
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [syncError, setSyncError] = useState(false);
   const [syncReport, setSyncReport] = useState<{ missing: string[]; unmatched: { name: string; capHit: number; suggestion?: string }[] } | null>(null);
@@ -119,8 +121,9 @@ export default function PlayersScreen({ isAdmin, onBack }: { isAdmin: boolean; o
       if (!res.ok) throw new Error(res.data.error || 'Failed to sync salaries');
       const d = res.data;
       setSyncStatus(
-        `✓ Sync complete! Matched ${d.matchedCount} salaries. ${d.missingPlayers?.length ?? 0} players have no salary and ${d.unmatchedCount ?? 0} contract names couldn't be matched to a player.`
+        `✓ Sync complete! Matched ${d.matchedCount} salaries. ${d.pendingReviewCount ?? 0} ambiguous groups need review. ${d.missingPlayers?.length ?? 0} players have no shared salary and ${d.unmatchedCount ?? 0} contract names couldn't be matched.`
       );
+      setReviewRefresh((n) => n + 1);
       setSyncReport({ missing: d.missingPlayers ?? [], unmatched: d.unmatched ?? [] });
       load();
     } catch (e: any) {
@@ -195,6 +198,7 @@ export default function PlayersScreen({ isAdmin, onBack }: { isAdmin: boolean; o
               <Text style={[ui.link, { marginTop: 6 }]}>{showReport ? 'Hide details' : 'Show details'}</Text>
             </TouchableOpacity>
           )}
+          {isAdmin && <SalaryReviews refresh={reviewRefresh} onSaved={load} />}
           {showReport && syncReport && (
             <View style={{ marginTop: 6 }}>
               {syncReport.missing.length > 0 && (

@@ -26,8 +26,32 @@ export interface UnmatchedEntry {
 export interface SalaryImportResult {
   matched: MatchResult[];
   unmatched: UnmatchedEntry[];
+  ambiguous: AmbiguousSalaryMatch[];
   totalParsed: number;
 }
+
+export interface SalaryPlayer {
+  id: number;
+  fullName: string;
+  teamAbbrev?: string;
+}
+
+export interface AmbiguousSalaryMatch {
+  salaries: SalaryEntry[];
+  players: SalaryPlayer[];
+}
+
+export interface SalaryReview {
+  key: string;
+  fingerprint: string;
+  details: AmbiguousSalaryMatch & { previousSalaries?: Record<string, number> };
+}
+
+export type SalaryReviewChoice =
+  | { playerId: number; kind: 'unknown' }
+  | { playerId: number; kind: 'manual'; capHit: number }
+  | { playerId: number; kind: 'previous' }
+  | { playerId: number; kind: 'source'; index: number };
 
 const NICKNAMES: Record<string, string> = {
   matt: 'matthew', tom: 'thomas', tommy: 'thomas', josh: 'joshua', alex: 'alexander',
@@ -306,14 +330,7 @@ export async function fetchSpotracSalaries(
     }
   }
 
-  // De-duplicate by normalized name (keep first occurrence = highest cap hit)
-  const seen = new Set<string>();
-  return all.filter((e) => {
-    const key = normalizeName(e.name);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return all;
 }
 
 /**
@@ -321,81 +338,73 @@ export async function fetchSpotracSalaries(
  */
 export function matchSalariesWithNHL(
   salaries: SalaryEntry[],
-  nhlPlayers: Array<{ id: number; fullName: string; teamAbbrev?: string }>
+  nhlPlayers: SalaryPlayer[]
 ): SalaryImportResult {
-  const normMap = new Map<string, { id: number; fullName: string }>();
-  for (const p of nhlPlayers) {
-    normMap.set(normalizeName(p.fullName), { id: p.id, fullName: p.fullName });
-  }
-
   const matched: MatchResult[] = [];
   const unmatched: UnmatchedEntry[] = [];
-
+  const candidates: { salary: SalaryEntry; players: SalaryPlayer[]; confidence: 'exact' | 'fuzzy'; score?: number }[] = [];
   for (const s of salaries) {
     const key = normalizeName(s.name);
-    const exact = normMap.get(key);
-
-    if (exact) {
-      matched.push({
-        playerId: exact.id,
-        playerName: exact.fullName,
-        sourceName: s.name,
-        capHit: s.capHit,
-        confidence: 'exact',
-      });
+    const exact = nhlPlayers.filter((player) => normalizeName(player.fullName) === key);
+    if (exact.length) {
+      candidates.push({ salary: s, players: exact, confidence: 'exact' });
+      continue;
+    }
+    const initials = nhlPlayers.filter((player) =>
+      lastNameKey(player.fullName) === lastNameKey(s.name) && normalizeName(player.fullName)[0] === key[0]
+    );
+    if (initials.length > 0) {
+      candidates.push({ salary: s, players: initials, confidence: 'fuzzy', score: 0.9 });
+      continue;
+    }
+    let bestScore = 0;
+    let bestPlayers: SalaryPlayer[] = [];
+    for (const player of nhlPlayers) {
+      const score = nameSimilarity(s.name, player.fullName);
+      if (score > bestScore) {
+        bestScore = score;
+        bestPlayers = [player];
+      } else if (score === bestScore) {
+        bestPlayers.push(player);
+      }
+    }
+    if (bestScore >= 0.85 && bestPlayers.length) {
+      candidates.push({ salary: s, players: bestPlayers, confidence: 'fuzzy', score: bestScore });
     } else {
-      // Same last name + same first initial, only if unambiguous
-      const sLast = lastNameKey(s.name);
-      const sInit = normalizeName(s.name)[0];
-      const cands = nhlPlayers.filter(
-        (p) => lastNameKey(p.fullName) === sLast && normalizeName(p.fullName)[0] === sInit
-      );
-      if (cands.length === 1) {
-        matched.push({
-          playerId: cands[0].id,
-          playerName: cands[0].fullName,
-          sourceName: s.name,
-          capHit: s.capHit,
-          confidence: 'fuzzy',
-          fuzzyScore: 0.9,
-        });
-        continue;
-      }
-
-      // Fuzzy search across players
-      let bestScore = 0;
-      let bestPlayer: { id: number; fullName: string } | null = null;
-
-      for (const p of nhlPlayers) {
-        const sim = nameSimilarity(s.name, p.fullName);
-        if (sim > bestScore) {
-          bestScore = sim;
-          bestPlayer = p;
-        }
-      }
-
-      if (bestScore >= 0.85 && bestPlayer) {
-        matched.push({
-          playerId: bestPlayer.id,
-          playerName: bestPlayer.fullName,
-          sourceName: s.name,
-          capHit: s.capHit,
-          confidence: 'fuzzy',
-          fuzzyScore: bestScore,
-        });
-      } else {
-        unmatched.push({
-          sourceName: s.name,
-          capHit: s.capHit,
-          bestMatch: bestPlayer ? { playerId: bestPlayer.id, playerName: bestPlayer.fullName, score: bestScore } : undefined,
-        });
-      }
+      const bestPlayer = bestPlayers[0];
+      unmatched.push({ sourceName: s.name, capHit: s.capHit, bestMatch: bestPlayer
+        ? { playerId: bestPlayer.id, playerName: bestPlayer.fullName, score: bestScore } : undefined });
     }
   }
 
-  return {
-    matched,
-    unmatched,
-    totalParsed: salaries.length,
-  };
+  const ambiguous: AmbiguousSalaryMatch[] = [];
+  const remaining = new Set(candidates.map((_, index) => index));
+  while (remaining.size) {
+    const first = remaining.values().next().value as number;
+    remaining.delete(first);
+    const group = [candidates[first]];
+    const players = new Map(candidates[first].players.map((player) => [player.id, player]));
+    let expanded = true;
+    while (expanded) {
+      expanded = false;
+      for (const index of remaining) {
+        const candidate = candidates[index];
+        if (candidate.players.some((player) => players.has(player.id))) {
+          remaining.delete(index);
+          group.push(candidate);
+          for (const player of candidate.players) players.set(player.id, player);
+          expanded = true;
+        }
+      }
+    }
+    if (group.length > 1 || players.size > 1) {
+      ambiguous.push({ salaries: group.map((item) => item.salary), players: [...players.values()] });
+    } else {
+      const item = group[0];
+      const player = item.players[0];
+      matched.push({ playerId: player.id, playerName: player.fullName, sourceName: item.salary.name,
+        capHit: item.salary.capHit, confidence: item.confidence, fuzzyScore: item.score });
+    }
+  }
+  return { matched, unmatched, ambiguous, totalParsed: salaries.length };
 }
