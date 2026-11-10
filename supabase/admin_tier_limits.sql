@@ -2,6 +2,9 @@
 -- The existing subscription_tier values remain unchanged.
 BEGIN;
 
+-- Replace this placeholder with the verified owner's sign-in email before running.
+SELECT set_config('draftline.owner_email', 'REPLACE_WITH_OWNER_EMAIL', true);
+
 ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS is_super_admin boolean NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS public.app_owner (
@@ -21,6 +24,13 @@ BEGIN
     RAISE EXCEPTION 'Expected exactly one existing super admin; verify the owner before applying this migration.';
   END IF;
   SELECT id INTO existing_owner FROM public.profiles WHERE is_super_admin;
+  IF NOT EXISTS (
+    SELECT 1 FROM auth.users WHERE id = existing_owner
+      AND lower(email) = lower(current_setting('draftline.owner_email'))
+      AND email_confirmed_at IS NOT NULL
+  ) THEN
+    RAISE EXCEPTION 'The confirmed owner email must match the existing super-admin account.';
+  END IF;
   IF EXISTS (SELECT 1 FROM public.app_owner WHERE user_id <> existing_owner) THEN
     RAISE EXCEPTION 'The existing owner does not match the super-admin profile.';
   END IF;
