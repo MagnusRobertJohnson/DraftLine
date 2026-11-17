@@ -47,6 +47,29 @@ export default function SettingsPage() {
     load();
   }, []);
 
+  // After checkout the webhook may take a few seconds to grant the plan, so reload the profile a few times.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('purchase') !== 'success') return;
+    setMessage('Thanks! Your purchase is being confirmed. Your plan will update in a moment.');
+    const timers = [2000, 5000, 10000, 20000].map((ms) => setTimeout(load, ms));
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  const startCheckout = async (plan: 'admin_basic' | 'admin_top') => {
+    const { data: session } = await supabase.auth.getSession();
+    const res = await fetch('/api/checkout', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.session?.access_token ?? ''}`,
+      },
+      body: JSON.stringify({ plan }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok || !body.url) return flash(body.error || 'Could not start checkout.', true);
+    window.location.href = body.url;
+  };
+
   const flash = (msg: string, isError = false) => {
     setMessage(isError ? '' : msg);
     setError(isError ? msg : '');
@@ -210,8 +233,8 @@ export default function SettingsPage() {
 
       <div className={card}>
         <h2 className="font-bold text-slate-100">Plan</h2>
-        <p className="text-xs text-amber-300">
-          Admin and Admin Pro are one-time purchases. Purchasing is not available yet.
+        <p className="text-xs text-slate-400">
+          Admin and Admin Pro are one-time purchases. Admin owners can upgrade to Admin Pro at a discounted price.
         </p>
         <div className="space-y-2">
           {PLANS.map((p) => {
@@ -229,6 +252,13 @@ export default function SettingsPage() {
                 </div>
                 {current ? (
                   <span className="text-ice-300 text-xs font-semibold">Current plan</span>
+                ) : !profile.is_super_admin && profile.subscription_tier !== 'admin_top' && !(profile.subscription_tier === 'admin_basic' && p.tier === 'admin_basic') ? (
+                  <button
+                    onClick={() => startCheckout(p.tier as 'admin_basic' | 'admin_top')}
+                    className="bg-ice-600 hover:bg-ice-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold"
+                  >
+                    {profile.subscription_tier === 'admin_basic' ? 'Upgrade' : 'Buy'}
+                  </button>
                 ) : null}
               </div>
             );
