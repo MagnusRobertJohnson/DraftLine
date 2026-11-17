@@ -12,7 +12,7 @@ A modern, multi-tenant fantasy hockey draft pool platform engineered for both **
    - **Administrators (Tiered):**
      - **Admin:** Create & manage up to **3 drafts** per NHL season.
      - **Admin Pro:** Create & manage up to **15 drafts** per NHL season.
-     - Each is intended as a one-time purchase. Online purchasing is not connected yet.
+     - Each is a one-time purchase on the web through Polar. Admin owners can upgrade to Admin Pro at a discounted price. Mobile purchasing (RevenueCat) is not connected yet.
      - Quota enforcement built directly into Supabase database triggers.
 
 2. **Per-Draft Customization & Isolation**
@@ -81,7 +81,7 @@ HockeyPool.Public/
 
 For an existing database, run only `salary_ambiguity_review.sql` in the SQL Editor before deploying the updated web application; do not rerun the full schema. After a salary sync, administrators can open **Review players** on the players screen to confirm a previous shared salary, choose a source salary, enter a shared correction, or mark each player unknown. If the underlying ambiguous source data changes, that group requires review again.
 
-For the Admin and Admin Pro limits and privilege protection, replace the owner email placeholder in [`supabase/admin_tier_limits.sql`](./supabase/admin_tier_limits.sql), then run it on an existing database. Verify that your profile is the only existing super admin; the migration stops without changes if the confirmed email does not match that profile or if there are zero or multiple super admins. It preserves current tier values and super-admin access. The limits apply per season; deleting a draft frees a slot. The internal profile values `admin_basic` and `admin_top` correspond to Admin and Admin Pro. The temporary self-upgrade endpoint is disabled, but Polar and RevenueCat purchase verification is not implemented. The older `payment_wall.sql` is retired and must not be used.
+For the Admin and Admin Pro limits and privilege protection, replace the owner email placeholder in [`supabase/admin_tier_limits.sql`](./supabase/admin_tier_limits.sql), then run it on an existing database. Verify that your profile is the only existing super admin; the migration stops without changes if the confirmed email does not match that profile or if there are zero or multiple super admins. It preserves current tier values and super-admin access. The limits apply per season; deleting a draft frees a slot. The internal profile values `admin_basic` and `admin_top` correspond to Admin and Admin Pro. The temporary self-upgrade endpoint is disabled. Web purchases are applied by the Polar webhook (`/api/webhooks/polar`) using [`supabase/polar_purchases.sql`](./supabase/polar_purchases.sql), run after `admin_tier_limits.sql`. Set these environment variables in Vercel: `POLAR_WEBHOOK_SECRET`, `POLAR_ACCESS_TOKEN`, `POLAR_SERVER` (`sandbox` or `production`), `POLAR_PRODUCT_ID_ADMIN`, `POLAR_PRODUCT_ID_ADMIN_PRO`, `POLAR_PRODUCT_ID_ADMIN_PRO_UPGRADE`, and `NEXT_PUBLIC_APP_URL`. RevenueCat verification is not implemented. The older `payment_wall.sql` is retired and must not be used.
 
 ### 2. Running the Web Application
 ```bash

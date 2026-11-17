@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@polar-sh/sdk": "^1.0.2",
     "@supabase/supabase-js": "^2.43.4",
     "clsx": "^2.1.1",
     "lucide-react": "^0.460.0",
